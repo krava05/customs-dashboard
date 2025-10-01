@@ -11,8 +11,9 @@ TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 # --- БЕЗОПАСНАЯ АУТЕНТИФИКАЦИЯ ---
 # Проверяем, запущен ли код в облаке Streamlit
 if 'GCP_CREDENTIALS' in st.secrets:
-    # Используем "секрет" из облака
-    creds_dict = st.secrets["GCP_CREDENTIALS"]
+    # ИСПРАВЛЕНИЕ: Преобразуем объект секрета в обычный словарь
+    creds_dict = dict(st.secrets["GCP_CREDENTIALS"])
+    
     creds_json_str = json.dumps(creds_dict)
     with open("gcp_credentials.json", "w") as f:
         f.write(creds_json_str)
