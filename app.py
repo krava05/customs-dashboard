@@ -1,22 +1,24 @@
+import os
 import streamlit as st
 from google.cloud import bigquery
 import pandas as pd
 from google.oauth2 import service_account
 
-# --- ФУНКЦИЯ ПРОВЕРКИ ПАРОЛЯ (остается для входа в приложение) ---
-# Пароль по-прежнему будет храниться в секретах, но уже в Cloud Run
+# --- ФУНКЦИЯ ПРОВЕРКИ ПАРОЛЯ ---
 def check_password():
     def password_entered():
-        if "APP_PASSWORD" not in st.secrets:
-            st.error("Пароль не настроен в секретах приложения!")
-            return
-        if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
+        # ИСПРАВЛЕНИЕ: Читаем пароль из переменных окружения, а не из st.secrets
+        if st.session_state["password"] == os.environ.get("APP_PASSWORD"):
             st.session_state["password_correct"] = True
             del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
     
-    # Эта часть остается без изменений
+    # Проверяем, существует ли переменная окружения с паролем
+    if not os.environ.get("APP_PASSWORD"):
+        st.error("Пароль не настроен в переменных окружения приложения!")
+        return False
+
     if "password_correct" not in st.session_state:
         st.text_input("Введіть пароль для доступу", type="password", on_change=password_entered, key="password")
         return False
@@ -29,12 +31,10 @@ def check_password():
 
 # --- ОСНОВНОЙ КОД ПРИЛОЖЕНИЯ ---
 if check_password():
-    # --- НАЛАШТУВАННЯ ---
     PROJECT_ID = "ua-customs-analytics"
     TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 
-    # --- АУТЕНТИФИКАЦИЯ (НОВЫЙ, АВТОМАТИЧЕСКИЙ МЕТОД) ---
-    # Код автоматически найдет права доступа внутри Google Cloud
+    # --- АУТЕНТИФИКАЦИЯ (АВТОМАТИЧЕСКАЯ) ---
     try:
         client = bigquery.Client(project=PROJECT_ID)
         st.session_state['client_ready'] = True
@@ -42,12 +42,11 @@ if check_password():
         st.error(f"Помилка аутентифікації в Google: {e}")
         st.session_state['client_ready'] = False
 
-    # --- ФУНКЦІЯ ДЛЯ ЗАВАНТАЖЕННЯ ДАНИХ ---
+    # --- ФУНКЦІЯ ДЛЯ ЗАГРУЗКИ ДАННЫХ ---
     @st.cache_data
     def load_data(query):
         if st.session_state.get('client_ready', False):
             try:
-                # Используем клиент, созданный автоматически
                 df = client.query(query).to_dataframe()
                 return df
             except Exception as e:
@@ -55,12 +54,11 @@ if check_password():
                 return pd.DataFrame()
         return pd.DataFrame()
     
-    # --- ИНТЕРФЕЙС (остается без изменений) ---
+    # --- ИНТЕРФЕЙС ---
     if st.session_state.get('client_ready', False):
         st.set_page_config(layout="wide")
         st.title("Аналітика Митних Даних")
         st.sidebar.header("Фільтри")
-        # ... (все фильтры и отображение данных)
         nazva_kompanii = st.sidebar.text_input("Назва компанії")
         kod_yedrpou = st.sidebar.text_input("Код ЄДРПОУ")
         kraina_partner = st.sidebar.text_input("Країна-партнер")
