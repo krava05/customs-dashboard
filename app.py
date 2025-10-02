@@ -10,15 +10,17 @@ def check_password():
 
     def password_entered():
         """Checks whether a password entered by the user is correct."""
-        if "APP_PASSWORD" not in st.secrets:
-            st.error("Пароль не настроен в 'секретах' приложения.")
-            return
-
-        if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
+        # ИСПРАВЛЕНИЕ: Ищем пароль внутри GCP_CREDENTIALS
+        if st.session_state["password"] == st.secrets["GCP_CREDENTIALS"]["APP_PASSWORD"]:
             st.session_state["password_correct"] = True
             del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
+
+    # Проверяем, существует ли вообще секрет
+    if "GCP_CREDENTIALS" not in st.secrets or "APP_PASSWORD" not in st.secrets["GCP_CREDENTIALS"]:
+        st.error("Пароль не настроен в 'секретах' приложения!")
+        return False
 
     if "password_correct" not in st.session_state:
         st.text_input(
@@ -48,11 +50,10 @@ if check_password():
             f.write(creds_json_str)
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "gcp_credentials.json"
     else:
-        # Для локального запуска
         JSON_KEY_PATH = "ua-customs-analytics-08c5189db4e4.json"
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = JSON_KEY_PATH
 
-    # --- ФУНКЦІЯ ДЛЯ ЗАВАНТАЖЕННЯ ДАНИХ ---
+    # ... остальной код приложения остается без изменений ...
     @st.cache_data
     def load_data(query):
         try:
@@ -63,7 +64,6 @@ if check_password():
             st.error(f"Помилка під час завантаження даних з BigQuery: {e}")
             return pd.DataFrame()
 
-    # --- ІНТЕРФЕЙС ЗАСТОСУНКУ ---
     st.set_page_config(layout="wide")
     st.title("Аналітика Митних Даних")
     st.sidebar.header("Фільтри")
