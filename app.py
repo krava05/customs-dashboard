@@ -4,12 +4,6 @@ from google.cloud import bigquery
 import pandas as pd
 import json
 
-# --- ДИАГНОСТИКА ---
-st.warning("ЗАПУЩЕН ДИАГНОСТИЧЕСКИЙ РЕЖИМ")
-st.write("Ключи 'секретов', которые видит приложение:")
-st.write(st.secrets.keys())
-st.write("---")
-
 # --- ФУНКЦИЯ ПРОВЕРКИ ПАРОЛЯ ---
 def check_password():
     """Returns `True` if the user had a correct password."""
@@ -17,7 +11,7 @@ def check_password():
     def password_entered():
         """Checks whether a password entered by the user is correct."""
         if "APP_PASSWORD" not in st.secrets:
-            st.error("Секрет 'APP_PASSWORD' не найден в настройках!")
+            st.error("Пароль не настроен в 'секретах' приложения.")
             return
 
         if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
@@ -54,6 +48,7 @@ if check_password():
             f.write(creds_json_str)
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "gcp_credentials.json"
     else:
+        # Для локального запуска
         JSON_KEY_PATH = "ua-customs-analytics-08c5189db4e4.json"
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = JSON_KEY_PATH
 
