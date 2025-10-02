@@ -4,12 +4,22 @@ from google.cloud import bigquery
 import pandas as pd
 import json
 
+# --- ДИАГНОСТИКА ---
+st.warning("ЗАПУЩЕН ДИАГНОСТИЧЕСКИЙ РЕЖИМ")
+st.write("Ключи 'секретов', которые видит приложение:")
+st.write(st.secrets.keys())
+st.write("---")
+
 # --- ФУНКЦИЯ ПРОВЕРКИ ПАРОЛЯ ---
 def check_password():
     """Returns `True` if the user had a correct password."""
 
     def password_entered():
         """Checks whether a password entered by the user is correct."""
+        if "APP_PASSWORD" not in st.secrets:
+            st.error("Секрет 'APP_PASSWORD' не найден в настройках!")
+            return
+
         if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
             st.session_state["password_correct"] = True
             del st.session_state["password"]
