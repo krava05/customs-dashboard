@@ -10,17 +10,15 @@ def check_password():
 
     def password_entered():
         """Checks whether a password entered by the user is correct."""
-        # ИСПРАВЛЕНИЕ: Ищем пароль внутри GCP_CREDENTIALS
+        if "GCP_CREDENTIALS" not in st.secrets or "APP_PASSWORD" not in st.secrets["GCP_CREDENTIALS"]:
+            st.error("Пароль не настроен в 'секретах' приложения!")
+            return
+        
         if st.session_state["password"] == st.secrets["GCP_CREDENTIALS"]["APP_PASSWORD"]:
             st.session_state["password_correct"] = True
             del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
-
-    # Проверяем, существует ли вообще секрет
-    if "GCP_CREDENTIALS" not in st.secrets or "APP_PASSWORD" not in st.secrets["GCP_CREDENTIALS"]:
-        st.error("Пароль не настроен в 'секретах' приложения!")
-        return False
 
     if "password_correct" not in st.session_state:
         st.text_input(
@@ -45,6 +43,10 @@ if check_password():
     # --- БЕЗОПАСНАЯ АУТЕНТИФИКАЦИЯ ---
     if 'GCP_CREDENTIALS' in st.secrets:
         creds_dict = dict(st.secrets["GCP_CREDENTIALS"])
+        
+        # ИСПРАВЛЕНИЕ: "Чиним" перенос строк в private_key
+        creds_dict['private_key'] = creds_dict['private_key'].replace('\\n', '\n')
+        
         creds_json_str = json.dumps(creds_dict)
         with open("gcp_credentials.json", "w") as f:
             f.write(creds_json_str)
