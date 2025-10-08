@@ -2,3 +2,6 @@ streamlit
 google-cloud-bigquery
 pandas
 db-dtypes
+google-generativeai
+pyarrow
+pyxlsb
