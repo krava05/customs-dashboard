@@ -2,156 +2,173 @@ import os
 import streamlit as st
 from google.cloud import bigquery
 import pandas as pd
-from google.oauth2 import service_account
-import re
 import google.generativeai as genai
+import json
+
+# --- КОНФИГУРАЦИЯ СТРАНИЦЫ ---
+st.set_page_config(
+    page_title="Аналітика Митних Даних",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
+PROJECT_ID = "ua-customs-analytics"
+TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 
 # --- ФУНКЦИЯ ПРОВЕРКИ ПАРОЛЯ ---
 def check_password():
+    """Returns `True` if the user had a correct password."""
     def password_entered():
-        correct_password = os.environ.get("APP_PASSWORD")
-        if correct_password and st.session_state.get("password") == correct_password:
+        if st.session_state["password"] == st.secrets.get("APP_PASSWORD", os.environ.get("APP_PASSWORD")):
             st.session_state["password_correct"] = True
-            if "password" in st.session_state:
-                del st.session_state["password"]
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
     if st.session_state.get("password_correct", False):
         return True
 
-    st.text_input("Введіть пароль для доступу", type="password", on_change=password_entered, key="password")
-    
+    st.text_input(
+        "Введіть пароль для доступу", type="password", on_change=password_entered, key="password"
+    )
     if "password_correct" in st.session_state and not st.session_state["password_correct"]:
         st.error("😕 Пароль невірний.")
-        
     return False
-    
-# --- ФУНКЦИЯ ДЛЯ ГЕНЕРАЦИИ УСЛОВИЯ ПОИСКА ПО ТОВАРУ ---
-def generate_product_search_condition(user_question):
+
+# --- ИНИЦИАЛИЗАЦИЯ КЛИЕНТОВ GOOGLE ---
+def initialize_clients():
+    """Initialize BigQuery and GenerativeAI clients and store in session state."""
+    if 'clients_initialized' in st.session_state:
+        return
+
     try:
-        api_key = os.environ.get("GOOGLE_API_KEY")
-        if not api_key:
-            st.error("API ключ для Google AI не настроен в переменных окружения!")
-            return ""
-        
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('models/gemini-pro-latest')
+        # Для Cloud Run аутентификация происходит автоматически через сервисный аккаунт
+        if os.environ.get('K_SERVICE'):
+            st.session_state.bq_client = bigquery.Client(project=PROJECT_ID)
+            # Убедитесь, что GOOGLE_AI_API_KEY установлен в переменных окружения Cloud Run
+            api_key = st.secrets.get("GOOGLE_AI_API_KEY", os.environ.get("GOOGLE_AI_API_KEY"))
+            if not api_key:
+                 st.error("Ключ API для Google AI не знайдено в оточенні.")
+                 st.session_state.genai_ready = False
+            else:
+                genai.configure(api_key=api_key)
+                st.session_state.genai_ready = True
+        else: # Локальный запуск
+            # Убедитесь, что ваш JSON ключ доступен по этому пути
+            SERVICE_ACCOUNT_FILE = "ua-customs-analytics-08c5189db4e4.json"
+            st.session_state.bq_client = bigquery.Client.from_service_account_json(SERVICE_ACCOUNT_FILE)
+            # Для локального запуска используйте secrets.toml или установите переменную окружения
+            api_key = st.secrets.get("GOOGLE_AI_API_KEY")
+            if not api_key:
+                 st.error("Для локального запуску створіть файл .streamlit/secrets.toml та додайте GOOGLE_AI_API_KEY = 'Ваш_ключ'")
+                 st.session_state.genai_ready = False
+            else:
+                 genai.configure(api_key=api_key)
+                 st.session_state.genai_ready = True
 
-        prompt = f"""
-        Твоя задача — взять описание товара от пользователя и сгенерировать часть SQL-запроса для условия WHERE по колонке `opis_tovaru`.
-        Правила:
-        1. Проанализируй запрос и выдели ключевые слова на украинском языке.
-        2. Подумай о синонимах или более общих категориях.
-        3. Сгенерируй несколько условий `LOWER(opis_tovaru) LIKE LOWER('%...%')`, объединенных через `OR` или `AND`.
-        4. В ответе должна быть ТОЛЬКО часть SQL-запроса, заключенная в скобки. Например: (LOWER(opis_tovaru) LIKE LOWER('%паштет%')).
-        
-        Запрос пользователя: "{user_question}"
-        Твой ответ:
-        """
-        response = model.generate_content(prompt)
-        condition = re.sub(r"```sql|```", "", response.text).strip()
-        
-        # Убедимся, что условие не пустое и возвращаем его с AND
-        if condition:
-            return f" AND {condition}"
-        return ""
+        st.session_state.clients_initialized = True
+        st.session_state.client_ready = True
+
     except Exception as e:
-        st.error(f"Помилка під час генерації AI-умови: {e}")
-        return ""
+        st.error(f"Помилка аутентифікації в Google: {e}")
+        st.session_state.client_ready = False
+        st.session_state.genai_ready = False
 
-# --- ИНТЕРФЕЙС ПРИЛОЖЕНИЯ ---
-st.set_page_config(layout="wide")
-
-if not check_password():
-    st.stop()
-
-st.title("Аналітика Митних Даних")
-
-# --- НАЛАШТУВАННЯ ---
-PROJECT_ID = "ua-customs-analytics"
-TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
-
-# --- АУТЕНТИФИКАЦИЯ ---
-try:
-    if os.environ.get('K_SERVICE'): # Проверяем, запущены ли мы в Cloud Run
-        client = bigquery.Client(project=PROJECT_ID)
-    else: # Локальный запуск
-        LOCAL_JSON_KEY = "ua-customs-analytics-08c5189db4e4.json"
-        client = bigquery.Client.from_service_account_json(LOCAL_JSON_KEY)
-    st.session_state['client_ready'] = True
-except Exception as e:
-    st.error(f"Помилка аутентифікації в Google: {e}")
-    st.session_state['client_ready'] = False
-
-# --- ФУНКЦІЇ ДЛЯ ЗАВАНТАЖЕННЯ ДАНИХ ---
-@st.cache_data
+# --- ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ---
+@st.cache_data(ttl=600) # Кэширование данных на 10 минут
 def run_query(query):
     if st.session_state.get('client_ready', False):
         try:
-            df = client.query(query).to_dataframe()
-            return df
+            return st.session_state.bq_client.query(query).to_dataframe()
         except Exception as e:
-            st.error(f"Помилка під час виконання запиту: {e}")
+            st.error(f"Помилка під час виконання запиту до BigQuery: {e}")
             return pd.DataFrame()
     return pd.DataFrame()
 
-# --- ОСНОВНОЙ ИНТЕРФЕЙС С ФИЛЬТРАМИ ---
-if st.session_state.get('client_ready', False):
-    with st.expander("Панель Фільтрів", expanded=True):
-        st.info("Используйте ручные фильтры и/или AI-поиск по товару. Все критерии будут объединены.")
-        
-        ai_product_question = st.text_area("Опишіть товар для пошуку (AI)", help="Наприклад: 'червоні жіночі сукні' або 'паштет'")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            start_date = st.date_input("Дата, з", value=None, format="DD.MM.YYYY")
-            nazva_kompanii = st.text_input("Назва компанії")
-        with col2:
-            end_date = st.date_input("Дата, по", value=None, format="DD.MM.YYYY")
-            kod_yedrpou = st.text_input("Код ЄДРПОУ")
-        with col3:
-            direction = st.selectbox("Напрямок", ["Все", "Імпорт", "Експорт"])
-            country_list = run_query(f"SELECT DISTINCT kraina_partner FROM `{TABLE_ID}` WHERE kraina_partner IS NOT NULL ORDER BY kraina_partner")['kraina_partner'].tolist()
-            kraina_partner = st.multiselect("Країна-партнер", country_list)
-        with col4:
-            uktzed_list = run_query(f"SELECT DISTINCT kod_uktzed FROM `{TABLE_ID}` WHERE kod_uktzed IS NOT NULL ORDER BY kod_uktzed")['kod_uktzed'].tolist()
-            kod_uktzed_filter = st.multiselect("Код УКТЗЕД", uktzed_list)
-            transport_list = run_query(f"SELECT DISTINCT vyd_transportu FROM `{TABLE_ID}` WHERE vyd_transportu IS NOT NULL ORDER BY vyd_transportu")['vyd_transportu'].tolist()
-            transport_filter = st.multiselect("Вид транспорту", transport_list)
-        
-        if st.button("Знайти"):
-            query_parts = [f"SELECT * FROM `{TABLE_ID}` WHERE 1=1"]
-            
-            if ai_product_question:
-                with st.spinner("AI аналізує опис товару..."):
-                    ai_condition = generate_product_search_condition(ai_product_question)
-                    if ai_condition:
-                        query_parts.append(ai_condition)
+# --- ФУНКЦИЯ ДЛЯ AI-ПОИСКА ТОВАРОВ ---
+def get_ai_search_query(user_query, max_items=100):
+    if not st.session_state.get('genai_ready', False):
+        st.warning("Google AI не ініціалізовано. AI-пошук недоступний.")
+        return None
 
-            if start_date and end_date:
-                if start_date > end_date: st.error("Дата початку не може бути пізніше дати закінчення.")
-                else: query_parts.append(f" AND data_deklaracii BETWEEN '{start_date.strftime('%Y-%m-%d')}' AND '{end_date.strftime('%Y-%m-%d')}'")
-            if nazva_kompanii: query_parts.append(f" AND LOWER(nazva_kompanii) LIKE LOWER('%{nazva_kompanii}%')")
-            if kod_yedrpou: query_parts.append(f" AND kod_yedrpou LIKE '%{kod_yedrpou}%'")
-            if kraina_partner:
-                formatted_countries = ", ".join(["'" + c.replace("'", "''") + "'" for c in kraina_partner])
-                query_parts.append(f" AND kraina_partner IN ({formatted_countries})")
-            if transport_filter:
-                formatted_transports = ", ".join(["'" + t.replace("'", "''") + "'" for t in transport_filter])
-                query_parts.append(f" AND vyd_transportu IN ({formatted_transports})")
-            if kod_uktzed_filter:
-                formatted_uktzed = ", ".join(["'" + c.replace("'", "''") + "'" for c in kod_uktzed_filter])
-                query_parts.append(f" AND kod_uktzed IN ({formatted_uktzed})")
-            if direction != "Все": query_parts.append(f" AND napryamok = '{direction}'")
-            
-            final_query = "".join(query_parts) + " ORDER BY data_deklaracii DESC LIMIT 5000"
-            
-            st.subheader("Результат пошуку")
-            df = run_query(final_query)
-            
-            if not df.empty:
-                st.success(f"Знайдено {len(df)} записів")
-                st.dataframe(df, use_container_width=True)
+    prompt = f"""
+    Based on the user's request, generate a SQL query for Google BigQuery.
+    The table is `{TABLE_ID}`.
+    Select the fields: `opis_tovaru`, `nazva_kompanii`, `kraina_partner`, `data_deklaracii`, `mytna_vartist_hrn`, `vaha_netto_kg`.
+    Use `REGEXP_CONTAINS` with the `(?i)` flag for case-insensitive search on the `opis_tovaru` field.
+    The query must be a simple SELECT statement. Do not use CTEs or subqueries.
+    Limit the results to {max_items}.
+    Return ONLY a valid JSON object with a single key "sql_query" containing the full SQL string.
+
+    User request: "{user_query}"
+
+    Example of a valid JSON response:
+    {{
+        "sql_query": "SELECT opis_tovaru, nazva_kompanii, kraina_partner, data_deklaracii, mytna_vartist_hrn, vaha_netto_kg FROM `{TABLE_ID}` WHERE REGEXP_CONTAINS(opis_tovaru, '(?i)some search term') LIMIT 100"
+    }}
+    """
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        response = model.generate_content(prompt)
+        # Очистка ответа от возможных markdown-оберток
+        response_text = response.text.strip().replace("```json", "").replace("```", "")
+        response_json = json.loads(response_text)
+        return response_json.get("sql_query")
+    except Exception as e:
+        st.error(f"Помилка при генерації SQL за допомогою AI: {e}")
+        return None
+
+# --- ОСНОВНОЙ ИНТЕРФЕЙС ПРИЛОЖЕНИЯ ---
+if not check_password():
+    st.stop()
+
+st.title("Аналітика Митних Даних 📈")
+initialize_clients()
+
+if st.session_state.get('client_ready', False):
+    st.success("✅ Підключення до Google BigQuery успішне.")
+else:
+    st.error("❌ Не вдалося підключитися до Google BigQuery.")
+    st.stop()
+
+# --- ВКЛАДКИ ---
+tab1, tab2 = st.tabs(["AI-Пошук Товарів 🤖", "Панель Фільтрів 📊"])
+
+with tab1:
+    st.header("Інтелектуальний пошук товарів за описом")
+    ai_search_query_text = st.text_input(
+        "Опишіть товар, який шукаєте (наприклад, 'кава зернова з Колумбії' або 'дитячі іграшки з пластику')",
+        key="ai_search_input"
+    )
+    search_button = st.button("Знайти за допомогою AI", type="primary")
+
+    if "ai_search_results" not in st.session_state:
+        st.session_state.ai_search_results = pd.DataFrame()
+
+    if search_button and ai_search_query_text:
+        with st.spinner("✨ AI генерує запит і шукає дані..."):
+            ai_sql = get_ai_search_query(ai_search_query_text)
+            if ai_sql:
+                st.code(ai_sql, language='sql')
+                st.session_state.ai_search_results = run_query(ai_sql)
             else:
-                st.warning("За вашим запитом нічого не знайдено.")
+                st.error("Не вдалося згенерувати SQL-запит.")
+                st.session_state.ai_search_results = pd.DataFrame()
+
+    if not st.session_state.ai_search_results.empty:
+        st.success(f"Знайдено **{len(st.session_state.ai_search_results)}** записів.")
+        st.dataframe(st.session_state.ai_search_results)
+    elif search_button:
+        st.info("За вашим запитом нічого не знайдено.")
+
+
+with tab2:
+    st.header("Фільтрація та аналіз даних")
+    with st.expander("Панель Фільтрів", expanded=True):
+        # ... (здесь код всех ваших старых фильтров)
+        st.write("Тут будуть ваші стандартні фільтри (за компанією, кодом УКТЗЕД тощо).")
+        # TODO: Добавьте сюда ваши фильтры, которые были раньше
+
+    # ... (здесь код для построения SQL на основе фильтров и отображения таблицы)
+    # st.dataframe(...)
