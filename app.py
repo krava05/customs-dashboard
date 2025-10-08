@@ -51,7 +51,24 @@ def generate_sql_from_prompt(user_question):
         model = genai.GenerativeModel('models/gemini-pro-latest')
 
         prompt = f"""
-        Ты — ИИ-ассистент...
+        Ты — ИИ-ассистент, который преобразует вопросы на естественном языке в SQL-запросы для Google BigQuery.
+        Имя таблицы: `ua-customs-analytics.ua_customs_data.declarations`.
+        Схема таблицы (имя_колонки: описание):
+        - data_deklaracii: дата (текст 'YYYY-MM-DD')
+        - napryamok: направление ('Імпорт' или 'Експорт') (текст)
+        - nazva_kompanii: название компании (текст)
+        - kod_yedrpou: код ЄДРПОУ (текст)
+        - kraina_partner: страна-партнер (текст)
+        - kod_uktzed: код товара УКТЗЕД (текст)
+        - opis_tovaru: описание товара (текст)
+        - mytna_vartist_hrn: таможенная стоимость в гривнах (текст)
+        - vaha_netto_kg: вес нетто в кг (текст)
+        - vyd_transportu: вид транспорта (текст)
+        Правила:
+        1. Для поиска по текстовым полям используй `LOWER(колонка) LIKE LOWER('%значение%')`.
+        2. Всегда используй `LIMIT 500` в конце запроса.
+        3. В ответе должен быть ТОЛЬКО SQL-код.
+
         Вопрос пользователя: "{user_question}"
         SQL-запрос:
         """
