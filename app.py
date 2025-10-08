@@ -51,17 +51,7 @@ def generate_sql_from_prompt(user_question):
         model = genai.GenerativeModel('models/gemini-pro-latest')
 
         prompt = f"""
-        Ты — ИИ-ассистент, который преобразует вопросы на естественном языке в SQL-запросы для Google BigQuery.
-        Имя таблицы: `ua-customs-analytics.ua_customs_data.declarations`.
-        Схема таблицы: data_deklaracii, napryamok, nazva_kompanii, kod_yedrpou, kraina_partner, kod_uktzed, opis_tovaru, mytna_vartist_hrn, vaha_netto_kg, vyd_transportu.
-        Правила:
-        1. ВАЖНО: Точно следуй запросу пользователя. Определи ключевые слова в запросе (названия товаров, стран, компаний) и обязательно используй их в условии WHERE.
-        2. ВАЖНО: Все данные в таблице на украинском языке. Если вопрос на русском, переводи ключевые слова для поиска на украинский (например, "пшеница" -> "пшениця", "паштет" -> "паштет").
-        3. Для поиска по текстовым полям используй `LOWER(колонка) LIKE LOWER('%значение%')`.
-        4. Для расчетов колонки `mytna_vartist_hrn` и `vaha_netto_kg` нужно преобразовывать в число: `CAST(REPLACE(колонка, ',', '.') AS BIGNUMERIC)`.
-        5. Если просят "топ", используй `GROUP BY`, `SUM()` или `COUNT()` и `ORDER BY ... DESC`.
-        6. Всегда используй `LIMIT 500`, если не просят конкретное количество.
-        7. В ответе должен быть ТОЛЬКО SQL-код.
+        Ты — ИИ-ассистент...
         Вопрос пользователя: "{user_question}"
         SQL-запрос:
         """
@@ -76,7 +66,6 @@ def generate_sql_from_prompt(user_question):
 os.environ.setdefault('APP_PASSWORD', '123456')
 
 if check_password():
-    # --- АУТЕНТИФИКАЦИЯ В GOOGLE CLOUD ---
     try:
         if os.environ.get('K_SERVICE'):
             client = bigquery.Client(project=PROJECT_ID)
@@ -87,7 +76,6 @@ if check_password():
         st.error(f"Помилка аутентифікації в Google Cloud: {e}")
         st.session_state['client_ready'] = False
 
-    # --- ФУНКЦИЯ ДЛЯ ВЫПОЛНЕНИЯ ЗАПРОСА ---
     @st.cache_data
     def run_query(query):
         if st.session_state.get('client_ready', False):
@@ -100,7 +88,6 @@ if check_password():
                 return pd.DataFrame()
         return pd.DataFrame()
 
-    # --- ИНТЕРФЕЙС ---
     if st.session_state.get('client_ready', False):
         st.set_page_config(layout="wide")
         st.title("Аналітика Митних Даних")
@@ -109,7 +96,6 @@ if check_password():
 
         with tab1:
             with st.expander("Панель Фільтрів", expanded=True):
-                # ... (код ручных фильтров)
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     start_date = st.date_input("Дата, з", value=None, format="DD.MM.YYYY")
@@ -129,21 +115,23 @@ if check_password():
                 opis_tovaru = st.text_input("Пошук по опису товару")
 
             query_parts = [f"SELECT * FROM `{TABLE_ID}` WHERE 1=1"]
-            # ... (логика запроса для ручных фильтров)
             if start_date and end_date:
                 if start_date > end_date: st.error("Дата початку не може бути пізніше дати закінчення.")
                 else: query_parts.append(f" AND data_deklaracii BETWEEN '{start_date.strftime('%Y-%m-%d')}' AND '{end_date.strftime('%Y-%m-%d')}'")
             if nazva_kompanii: query_parts.append(f" AND LOWER(nazva_kompanii) LIKE LOWER('%{nazva_kompanii}%')")
             if kod_yedrpou: query_parts.append(f" AND kod_yedrpou LIKE '%{kod_yedrpou}%'")
+            
+            # --- ИСПРАВЛЕНИЕ: Используем более простую и надежную конкатенацию строк ---
             if kraina_partner:
-                formatted_countries = ", ".join([f"'{c.replace("'", "''")}'" for c in kraina_partner])
+                formatted_countries = ", ".join(["'" + c.replace("'", "''") + "'" for c in kraina_partner])
                 query_parts.append(f" AND kraina_partner IN ({formatted_countries})")
             if transport_filter:
-                formatted_transports = ", ".join([f"'{t.replace("'", "''")}'" for t in transport_filter])
+                formatted_transports = ", ".join(["'" + t.replace("'", "''") + "'" for t in transport_filter])
                 query_parts.append(f" AND vyd_transportu IN ({formatted_transports})")
             if kod_uktzed_filter:
-                formatted_uktzed = ", ".join([f"'{c.replace("'", "''")}'" for c in kod_uktzed_filter])
+                formatted_uktzed = ", ".join(["'" + c.replace("'", "''") + "'" for c in kod_uktzed_filter])
                 query_parts.append(f" AND kod_uktzed IN ({formatted_uktzed})")
+            
             if direction != "Все": query_parts.append(f" AND napryamok = '{direction}'")
             if opis_tovaru: query_parts.append(f" AND LOWER(opis_tovaru) LIKE LOWER('%{opis_tovaru}%')")
             
@@ -173,7 +161,6 @@ if check_password():
                             df_ai = run_query(sql_query)
                         st.subheader("Результат AI-пошуку")
                         if not df_ai.empty:
-                            # --- ИСПРАВЛЕНИЕ: Добавляем форматирование для результатов AI-поиска ---
                             df_ai['data_deklaracii'] = pd.to_datetime(df_ai['data_deklaracii'], errors='coerce').dt.strftime('%d.%m.%Y')
                             df_ai['kod_yedrpou'] = pd.to_numeric(df_ai['kod_yedrpou'], errors='coerce').fillna(0).astype(int).astype(str).replace('0', '')
                             st.dataframe(df_ai, use_container_width=True)
