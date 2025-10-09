@@ -20,8 +20,6 @@ TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 def check_password():
     """Returns `True` if the user had a correct password."""
     def password_entered():
-        # <<< ИЗМЕНЕНИЕ ЗДЕСЬ
-        # Проверяем, где запущен код. В Cloud Run используем переменные окружения, локально - st.secrets
         if os.environ.get('K_SERVICE'):
             correct_password = os.environ.get("APP_PASSWORD")
         else:
@@ -50,11 +48,9 @@ def initialize_clients():
         return
 
     try:
-        # <<< ИЗМЕНЕНИЕ ЗДЕСЬ
-        # Для Cloud Run аутентификация происходит автоматически через сервисный аккаунт
         if os.environ.get('K_SERVICE'):
             st.session_state.bq_client = bigquery.Client(project=PROJECT_ID)
-            api_key = os.environ.get("GOOGLE_AI_API_KEY") # Берем ключ напрямую из переменных окружения
+            api_key = os.environ.get("GOOGLE_AI_API_KEY")
             if not api_key:
                  st.error("Ключ API для Google AI не знайдено в оточенні Cloud Run.")
                  st.session_state.genai_ready = False
@@ -64,7 +60,7 @@ def initialize_clients():
         else: # Локальный запуск
             SERVICE_ACCOUNT_FILE = "ua-customs-analytics-08c5189db4e4.json"
             st.session_state.bq_client = bigquery.Client.from_service_account_json(SERVICE_ACCOUNT_FILE)
-            api_key = st.secrets.get("GOOGLE_AI_API_KEY") # Локально используем st.secrets
+            api_key = st.secrets.get("GOOGLE_AI_API_KEY")
             if not api_key:
                  st.error("Для локального запуску створіть файл .streamlit/secrets.toml та додайте GOOGLE_AI_API_KEY = 'Ваш_ключ'")
                  st.session_state.genai_ready = False
@@ -79,8 +75,6 @@ def initialize_clients():
         st.error(f"Помилка аутентифікації в Google: {e}")
         st.session_state.client_ready = False
         st.session_state.genai_ready = False
-
-# --- (Остальной код остается без изменений) ---
 
 # --- ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ---
 @st.cache_data(ttl=600)
@@ -116,7 +110,8 @@ def get_ai_search_query(user_query, max_items=100):
     }}
     """
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        # <<< ИЗМЕНЕНИЕ 1: Заменили модель на 'gemini-pro'
+        model = genai.GenerativeModel('gemini-pro')
         response = model.generate_content(prompt)
         response_text = response.text.strip().replace("```json", "").replace("```", "")
         response_json = json.loads(response_text)
@@ -138,40 +133,42 @@ else:
     st.error("❌ Не вдалося підключитися до Google BigQuery.")
     st.stop()
 
-# --- ВКЛАДКИ ---
-tab1, tab2 = st.tabs(["AI-Пошук Товарів 🤖", "Панель Фільтрів 📊"])
+# <<< ИЗМЕНЕНИЕ 2: Убрали вкладки (st.tabs) и разместили все на одной странице
 
-with tab1:
-    st.header("Інтелектуальний пошук товарів за описом")
-    ai_search_query_text = st.text_input(
-        "Опишіть товар, який шукаєте (наприклад, 'кава зернова з Колумбії' або 'дитячі іграшки з пластику')",
-        key="ai_search_input"
-    )
-    search_button = st.button("Знайти за допомогою AI", type="primary")
+# --- Секция AI-поиска ---
+st.header("🤖 Інтелектуальний пошук товарів за описом")
+ai_search_query_text = st.text_input(
+    "Опишіть товар, який шукаєте (наприклад, 'кава зернова з Колумбії' або 'дитячі іграшки з пластику')",
+    key="ai_search_input"
+)
+search_button = st.button("Знайти за допомогою AI", type="primary")
 
-    if "ai_search_results" not in st.session_state:
-        st.session_state.ai_search_results = pd.DataFrame()
+if "ai_search_results" not in st.session_state:
+    st.session_state.ai_search_results = pd.DataFrame()
 
-    if search_button and ai_search_query_text:
-        with st.spinner("✨ AI генерує запит і шукає дані..."):
-            ai_sql = get_ai_search_query(ai_search_query_text)
-            if ai_sql:
-                st.code(ai_sql, language='sql')
-                st.session_state.ai_search_results = run_query(ai_sql)
-            else:
-                st.error("Не вдалося згенерувати SQL-запит.")
-                st.session_state.ai_search_results = pd.DataFrame()
+if search_button and ai_search_query_text:
+    with st.spinner("✨ AI генерує запит і шукає дані..."):
+        ai_sql = get_ai_search_query(ai_search_query_text)
+        if ai_sql:
+            st.code(ai_sql, language='sql')
+            st.session_state.ai_search_results = run_query(ai_sql)
+        else:
+            st.error("Не вдалося згенерувати SQL-запит.")
+            st.session_state.ai_search_results = pd.DataFrame()
 
-    if not st.session_state.ai_search_results.empty:
-        st.success(f"Знайдено **{len(st.session_state.ai_search_results)}** записів.")
-        st.dataframe(st.session_state.ai_search_results)
-    elif search_button:
-        st.info("За вашим запитом нічого не знайдено.")
+if not st.session_state.ai_search_results.empty:
+    st.success(f"Знайдено **{len(st.session_state.ai_search_results)}** записів.")
+    st.dataframe(st.session_state.ai_search_results)
+elif search_button:
+    st.info("За вашим запитом нічого не знайдено.")
 
-with tab2:
-    st.header("Фільтрація та аналіз даних")
-    with st.expander("Панель Фільтрів", expanded=True):
-        st.write("Тут будуть ваші стандартні фільтри (за компанією, кодом УКТЗЕД тощо).")
-        # TODO: Добавьте сюда ваши фильтры
+# --- Разделитель ---
+st.divider()
 
-    # TODO: Добавьте сюда код для построения SQL на основе фильтров и отображения таблицы
+# --- Секция фильтров ---
+st.header("📊 Фільтрація та аналіз даних")
+with st.expander("Панель Фільтрів", expanded=True):
+    st.write("Тут будуть ваші стандартні фільтри (за компанією, кодом УКТЗЕД тощо).")
+    # TODO: Добавьте сюда ваши фильтры
+
+# TODO: Добавьте сюда код для построения SQL на основе фильтров и отображения таблицы
