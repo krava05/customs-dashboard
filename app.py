@@ -20,7 +20,14 @@ TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 def check_password():
     """Returns `True` if the user had a correct password."""
     def password_entered():
-        if st.session_state["password"] == st.secrets.get("APP_PASSWORD", os.environ.get("APP_PASSWORD")):
+        # <<< ИЗМЕНЕНИЕ ЗДЕСЬ
+        # Проверяем, где запущен код. В Cloud Run используем переменные окружения, локально - st.secrets
+        if os.environ.get('K_SERVICE'):
+            correct_password = os.environ.get("APP_PASSWORD")
+        else:
+            correct_password = st.secrets.get("APP_PASSWORD")
+
+        if st.session_state["password"] == correct_password:
             st.session_state["password_correct"] = True
             del st.session_state["password"]
         else:
@@ -43,23 +50,21 @@ def initialize_clients():
         return
 
     try:
+        # <<< ИЗМЕНЕНИЕ ЗДЕСЬ
         # Для Cloud Run аутентификация происходит автоматически через сервисный аккаунт
         if os.environ.get('K_SERVICE'):
             st.session_state.bq_client = bigquery.Client(project=PROJECT_ID)
-            # Убедитесь, что GOOGLE_AI_API_KEY установлен в переменных окружения Cloud Run
-            api_key = st.secrets.get("GOOGLE_AI_API_KEY", os.environ.get("GOOGLE_AI_API_KEY"))
+            api_key = os.environ.get("GOOGLE_AI_API_KEY") # Берем ключ напрямую из переменных окружения
             if not api_key:
-                 st.error("Ключ API для Google AI не знайдено в оточенні.")
+                 st.error("Ключ API для Google AI не знайдено в оточенні Cloud Run.")
                  st.session_state.genai_ready = False
             else:
                 genai.configure(api_key=api_key)
                 st.session_state.genai_ready = True
         else: # Локальный запуск
-            # Убедитесь, что ваш JSON ключ доступен по этому пути
             SERVICE_ACCOUNT_FILE = "ua-customs-analytics-08c5189db4e4.json"
             st.session_state.bq_client = bigquery.Client.from_service_account_json(SERVICE_ACCOUNT_FILE)
-            # Для локального запуска используйте secrets.toml или установите переменную окружения
-            api_key = st.secrets.get("GOOGLE_AI_API_KEY")
+            api_key = st.secrets.get("GOOGLE_AI_API_KEY") # Локально используем st.secrets
             if not api_key:
                  st.error("Для локального запуску створіть файл .streamlit/secrets.toml та додайте GOOGLE_AI_API_KEY = 'Ваш_ключ'")
                  st.session_state.genai_ready = False
@@ -75,8 +80,10 @@ def initialize_clients():
         st.session_state.client_ready = False
         st.session_state.genai_ready = False
 
+# --- (Остальной код остается без изменений) ---
+
 # --- ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ---
-@st.cache_data(ttl=600) # Кэширование данных на 10 минут
+@st.cache_data(ttl=600)
 def run_query(query):
     if st.session_state.get('client_ready', False):
         try:
@@ -111,7 +118,6 @@ def get_ai_search_query(user_query, max_items=100):
     try:
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
         response = model.generate_content(prompt)
-        # Очистка ответа от возможных markdown-оберток
         response_text = response.text.strip().replace("```json", "").replace("```", "")
         response_json = json.loads(response_text)
         return response_json.get("sql_query")
@@ -162,13 +168,10 @@ with tab1:
     elif search_button:
         st.info("За вашим запитом нічого не знайдено.")
 
-
 with tab2:
     st.header("Фільтрація та аналіз даних")
     with st.expander("Панель Фільтрів", expanded=True):
-        # ... (здесь код всех ваших старых фильтров)
         st.write("Тут будуть ваші стандартні фільтри (за компанією, кодом УКТЗЕД тощо).")
-        # TODO: Добавьте сюда ваши фильтры, которые были раньше
+        # TODO: Добавьте сюда ваши фильтры
 
-    # ... (здесь код для построения SQL на основе фильтров и отображения таблицы)
-    # st.dataframe(...)
+    # TODO: Добавьте сюда код для построения SQL на основе фильтров и отображения таблицы
