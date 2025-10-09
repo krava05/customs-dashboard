@@ -1,92 +1,3 @@
-import os
-import streamlit as st
-from google.cloud import bigquery
-import pandas as pd
-import google.generativeai as genai
-import json
-
-# --- КОНФИГУРАЦИЯ СТРАНИЦЫ ---
-st.set_page_config(
-    page_title="Аналітика Митних Даних",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
-PROJECT_ID = "ua-customs-analytics"
-TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
-
-# --- ФУНКЦИЯ ПРОВЕРКИ ПАРОЛЯ ---
-def check_password():
-    """Returns `True` if the user had a correct password."""
-    def password_entered():
-        if os.environ.get('K_SERVICE'):
-            correct_password = os.environ.get("APP_PASSWORD")
-        else:
-            correct_password = st.secrets.get("APP_PASSWORD")
-
-        if st.session_state["password"] == correct_password:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
-
-    if st.session_state.get("password_correct", False):
-        return True
-
-    st.text_input(
-        "Введіть пароль для доступу", type="password", on_change=password_entered, key="password"
-    )
-    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
-        st.error("😕 Пароль невірний.")
-    return False
-
-# --- ИНИЦИАЛИЗАЦИЯ КЛИЕНТОВ GOOGLE ---
-def initialize_clients():
-    """Initialize BigQuery and GenerativeAI clients and store in session state."""
-    if 'clients_initialized' in st.session_state:
-        return
-
-    try:
-        if os.environ.get('K_SERVICE'):
-            st.session_state.bq_client = bigquery.Client(project=PROJECT_ID)
-            api_key = os.environ.get("GOOGLE_AI_API_KEY")
-            if not api_key:
-                 st.error("Ключ API для Google AI не знайдено в оточенні Cloud Run.")
-                 st.session_state.genai_ready = False
-            else:
-                genai.configure(api_key=api_key)
-                st.session_state.genai_ready = True
-        else: # Локальный запуск
-            SERVICE_ACCOUNT_FILE = "ua-customs-analytics-08c5189db4e4.json"
-            st.session_state.bq_client = bigquery.Client.from_service_account_json(SERVICE_ACCOUNT_FILE)
-            api_key = st.secrets.get("GOOGLE_AI_API_KEY")
-            if not api_key:
-                 st.error("Для локального запуску створіть файл .streamlit/secrets.toml та додайте GOOGLE_AI_API_KEY = 'Ваш_ключ'")
-                 st.session_state.genai_ready = False
-            else:
-                 genai.configure(api_key=api_key)
-                 st.session_state.genai_ready = True
-
-        st.session_state.clients_initialized = True
-        st.session_state.client_ready = True
-
-    except Exception as e:
-        st.error(f"Помилка аутентифікації в Google: {e}")
-        st.session_state.client_ready = False
-        st.session_state.genai_ready = False
-
-# --- ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ---
-@st.cache_data(ttl=600)
-def run_query(query):
-    if st.session_state.get('client_ready', False):
-        try:
-            return st.session_state.bq_client.query(query).to_dataframe()
-        except Exception as e:
-            st.error(f"Помилка під час виконання запиту до BigQuery: {e}")
-            return pd.DataFrame()
-    return pd.DataFrame()
-
 # --- ФУНКЦИЯ ДЛЯ AI-ПОИСКА ТОВАРОВ ---
 def get_ai_search_query(user_query, max_items=100):
     if not st.session_state.get('genai_ready', False):
@@ -110,8 +21,8 @@ def get_ai_search_query(user_query, max_items=100):
     }}
     """
     try:
-        # <<< ИЗМЕНЕНИЕ 1: Заменили модель на 'gemini-pro'
-        model = genai.GenerativeModel('gemini-pro')
+        # <<< ИЗМЕНЕНИЕ ЗДЕСЬ: Используем полное имя модели из списка
+        model = genai.GenerativeModel('models/gemini-pro-latest')
         response = model.generate_content(prompt)
         response_text = response.text.strip().replace("```json", "").replace("```", "")
         response_json = json.loads(response_text)
@@ -119,56 +30,3 @@ def get_ai_search_query(user_query, max_items=100):
     except Exception as e:
         st.error(f"Помилка при генерації SQL за допомогою AI: {e}")
         return None
-
-# --- ОСНОВНОЙ ИНТЕРФЕЙС ПРИЛОЖЕНИЯ ---
-if not check_password():
-    st.stop()
-
-st.title("Аналітика Митних Даних 📈")
-initialize_clients()
-
-if st.session_state.get('client_ready', False):
-    st.success("✅ Підключення до Google BigQuery успішне.")
-else:
-    st.error("❌ Не вдалося підключитися до Google BigQuery.")
-    st.stop()
-
-# <<< ИЗМЕНЕНИЕ 2: Убрали вкладки (st.tabs) и разместили все на одной странице
-
-# --- Секция AI-поиска ---
-st.header("🤖 Інтелектуальний пошук товарів за описом")
-ai_search_query_text = st.text_input(
-    "Опишіть товар, який шукаєте (наприклад, 'кава зернова з Колумбії' або 'дитячі іграшки з пластику')",
-    key="ai_search_input"
-)
-search_button = st.button("Знайти за допомогою AI", type="primary")
-
-if "ai_search_results" not in st.session_state:
-    st.session_state.ai_search_results = pd.DataFrame()
-
-if search_button and ai_search_query_text:
-    with st.spinner("✨ AI генерує запит і шукає дані..."):
-        ai_sql = get_ai_search_query(ai_search_query_text)
-        if ai_sql:
-            st.code(ai_sql, language='sql')
-            st.session_state.ai_search_results = run_query(ai_sql)
-        else:
-            st.error("Не вдалося згенерувати SQL-запит.")
-            st.session_state.ai_search_results = pd.DataFrame()
-
-if not st.session_state.ai_search_results.empty:
-    st.success(f"Знайдено **{len(st.session_state.ai_search_results)}** записів.")
-    st.dataframe(st.session_state.ai_search_results)
-elif search_button:
-    st.info("За вашим запитом нічого не знайдено.")
-
-# --- Разделитель ---
-st.divider()
-
-# --- Секция фильтров ---
-st.header("📊 Фільтрація та аналіз даних")
-with st.expander("Панель Фільтрів", expanded=True):
-    st.write("Тут будуть ваші стандартні фільтри (за компанією, кодом УКТЗЕД тощо).")
-    # TODO: Добавьте сюда ваши фильтры
-
-# TODO: Добавьте сюда код для построения SQL на основе фильтров и отображения таблицы
