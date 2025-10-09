@@ -134,7 +134,6 @@ if not st.session_state.get('client_ready', False):
 
 # --- СЕКЦИЯ AI-ПОИСКА ---
 st.header("🤖 Інтелектуальний пошук товарів за описом")
-# ИЗМЕНЕНИЕ: Убрали "(можна російською)"
 ai_search_query_text = st.text_input("Опишіть товар...", key="ai_search_input")
 search_button_ai = st.button("Знайти за допомогою AI", type="primary")
 if search_button_ai and ai_search_query_text:
@@ -168,7 +167,6 @@ with st.expander("Панель Фільтрів", expanded=True):
     with col5:
         yedrpou = st.text_input("Код ЄДРПОУ фірми:")
     with col6:
-        # ИЗМЕНЕНИЕ: Убрали "(можна російською)"
         company = st.text_input("Назва компанії:")
 
     search_button_filters = st.button("🔍 Знайти за фільтрами")
