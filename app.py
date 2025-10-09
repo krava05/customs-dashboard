@@ -5,42 +5,36 @@ import pandas as pd
 import google.generativeai as genai
 import json
 
-# --- КОНФИГУРАЦИЯ СТРАНИЦЫ ---
-st.set_page_config(
-    page_title="Аналітика Митних Даних",
-    layout="wide"
-)
+# --- КОНФИГУРАЦІЯ СТОРІНКИ ---
+st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 
-# --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
+# --- ГЛОБАЛЬНІ ЗМІННІ ---
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 
-# --- ФУНКЦИЯ ПРОВЕРКИ ПАРОЛЯ ---
+# --- ФУНКЦІЯ ПЕРЕВІРКИ ПАРОЛЮ ---
 def check_password():
+    # ... (код этой функции остается без изменений) ...
     def password_entered():
         if os.environ.get('K_SERVICE'):
             correct_password = os.environ.get("APP_PASSWORD")
         else:
             correct_password = st.secrets.get("APP_PASSWORD")
-
         if st.session_state.get("password") and st.session_state["password"] == correct_password:
             st.session_state["password_correct"] = True
             del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
-
     if st.session_state.get("password_correct", False):
         return True
-
-    st.text_input(
-        "Введіть пароль для доступу", type="password", on_change=password_entered, key="password"
-    )
+    st.text_input("Введіть пароль для доступу", type="password", on_change=password_entered, key="password")
     if "password_correct" in st.session_state and not st.session_state["password_correct"]:
         st.error("😕 Пароль невірний.")
     return False
 
-# --- ИНИЦИАЛИЗАЦИЯ КЛИЕНТОВ GOOGLE ---
+# --- ІНІЦІАЛІЗАЦІЯ КЛІЄНТІВ GOOGLE ---
 def initialize_clients():
+    # ... (код этой функции остается без изменений) ...
     if 'clients_initialized' in st.session_state:
         return
     try:
@@ -50,20 +44,19 @@ def initialize_clients():
         else:
             st.session_state.bq_client = bigquery.Client()
             api_key = st.secrets.get("GOOGLE_AI_API_KEY")
-
         if api_key:
             genai.configure(api_key=api_key)
             st.session_state.genai_ready = True
-
         st.session_state.clients_initialized = True
         st.session_state.client_ready = True
     except Exception as e:
         st.error(f"Помилка аутентифікації в Google: {e}")
         st.session_state.client_ready = False
 
-# --- ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ---
+# --- ФУНКЦІЯ ЗАВАНТАЖЕННЯ ДАНИХ ---
 @st.cache_data(ttl=3600)
 def run_query(query):
+    # ... (код этой функции остается без изменений) ...
     if st.session_state.get('client_ready', False):
         try:
             return st.session_state.bq_client.query(query).to_dataframe()
@@ -72,20 +65,29 @@ def run_query(query):
             return pd.DataFrame()
     return pd.DataFrame()
 
-# --- ФУНКЦИЯ ДЛЯ AI-ПОИСКА ---
-def get_ai_search_query(user_query, max_items=100):
+# --- НОВАЯ, УМНАЯ ФУНКЦИЯ "AI-АНАЛИТИК" ---
+def get_analytical_ai_query(user_question, max_items=50):
     if not st.session_state.get('genai_ready', False):
         return None
+    
     prompt = f"""
-    Based on the user's request, generate a SQL query for Google BigQuery.
-    The table is `{TABLE_ID}`.
-    The `opis_tovaru` column is in Ukrainian. The user's request might be in Russian. Account for this language difference when creating the search pattern.
-    Select all fields (*).
-    Use `REGEXP_CONTAINS` with the `(?i)` flag for a case-insensitive search on the `opis_tovaru` field.
-    Limit the results to {max_items}.
-    Return ONLY a valid JSON object with a single key "sql_query" containing the full SQL string.
+    You are an expert SQL analyst. Your task is to convert a user's analytical question into a single, executable Google BigQuery SQL query.
 
-    User request: "{user_query}"
+    DATABASE SCHEMA:
+    The table is `{TABLE_ID}`. Columns are: data_deklaracii, napryamok ('Імпорт' or 'Експорт'), nazva_kompanii, kod_yedrpou, kraina_partner, kod_uktzed, opis_tovaru, mytna_vartist_hrn, vaha_netto_kg, vyd_transportu.
+    All text is in Ukrainian. The user's question may be in Russian or Ukrainian.
+
+    INSTRUCTIONS:
+    1.  Analyze the user's question to identify key entities (like companies, goods, countries) and metrics (total value, total weight, count of declarations).
+    2.  If the user asks for a list of companies (e.g., "importers," "exporters"), you MUST use GROUP BY nazva_kompanii, kod_yedrpou.
+    3.  Calculate aggregate metrics: COUNT(*) as declaration_count, SUM(mytna_vartist_hrn) as total_value_hrn, SUM(vaha_netto_kg) as total_weight_kg.
+    4.  For semantic search on goods (e.g., "drone parts"), create a broad `REGEXP_CONTAINS` pattern for the `opis_tovaru` column. For "drone parts," search for terms like 'дрон', 'квадрокоптер', 'бпла', 'безпілотник', 'пропелер', 'запчастини до.*(дрон|бпла)'.
+    5.  Always filter by `napryamok` if the user specifies "importers" (`'Імпорт'`) or "exporters" (`'Експорт'`).
+    6.  Sort the results (`ORDER BY`) by the most relevant metric, usually in descending order (e.g., by total_value_hrn DESC).
+    7.  Limit the results to a reasonable number, like {max_items}.
+    8.  Return ONLY a valid JSON object with a single key "sql_query" containing the full SQL string.
+
+    USER'S QUESTION: "{user_question}"
     """
     try:
         model = genai.GenerativeModel('models/gemini-pro-latest')
@@ -94,25 +96,13 @@ def get_ai_search_query(user_query, max_items=100):
         response_json = json.loads(response_text)
         return response_json.get("sql_query")
     except Exception as e:
-        st.error(f"Помилка при генерації SQL за допомогою AI: {e}")
+        st.error(f"Помилка при генерації аналітичного SQL запиту: {e}")
         return None
 
-# --- НОВАЯ ФУНКЦИЯ ПЕРЕВОДА ДЛЯ ФИЛЬТРОВ ---
-@st.cache_data(ttl=3600)
-def translate_for_query(text_to_translate):
-    if not st.session_state.get('genai_ready', False) or not text_to_translate:
-        return text_to_translate
-    try:
-        prompt = f"Translate the following text to Ukrainian for a database search. Return ONLY the translated text. If the text is a proper name or already in Ukrainian, return it unchanged. Text: '{text_to_translate}'"
-        model = genai.GenerativeModel('models/gemini-pro-latest')
-        response = model.generate_content(prompt)
-        return response.text.strip().strip('"').strip("'")
-    except Exception:
-        return text_to_translate
-
-# --- ЗАГРУЗКА СПИСКОВ ДЛЯ ФИЛЬТРОВ ---
+# --- ЗАВАНТАЖЕННЯ СПИСКІВ ДЛЯ ФІЛЬТРІВ ---
 @st.cache_data(ttl=3600)
 def get_filter_options():
+    # ... (код этой функции остается без изменений) ...
     options = {}
     options['direction'] = ['Всі', 'Імпорт', 'Експорт']
     query_countries = f"SELECT DISTINCT kraina_partner FROM `{TABLE_ID}` WHERE kraina_partner IS NOT NULL ORDER BY kraina_partner"
@@ -121,37 +111,44 @@ def get_filter_options():
     options['transport'] = [''] + list(run_query(query_transport)['vyd_transportu'])
     return options
 
-# --- ОСНОВНОЙ ИНТЕРФЕЙС ПРИЛОЖЕНИЯ ---
+# --- ОСНОВНИЙ ІНТЕРФЕЙС ---
 if not check_password():
     st.stop()
 
 st.title("Аналітика Митних Даних 📈")
 initialize_clients()
-
 if not st.session_state.get('client_ready', False):
     st.error("❌ Не вдалося підключитися до Google BigQuery.")
     st.stop()
 
-# --- СЕКЦИЯ AI-ПОИСКА ---
-st.header("🤖 Інтелектуальний пошук товарів за описом")
-ai_search_query_text = st.text_input("Опишіть товар...", key="ai_search_input")
-search_button_ai = st.button("Знайти за допомогою AI", type="primary")
-if search_button_ai and ai_search_query_text:
-    with st.spinner("✨ AI генерує запит і шукає дані..."):
-        ai_sql = get_ai_search_query(ai_search_query_text)
-        if ai_sql:
-            st.code(ai_sql, language='sql')
-            ai_results_df = run_query(ai_sql)
-            st.success(f"Знайдено {len(ai_results_df)} записів.")
-            st.dataframe(ai_results_df)
+# --- НОВЫЙ РАЗДЕЛ: AI-АНАЛИТИК ---
+st.header("🤖 AI-Аналитик: Задайте сложный вопрос")
+ai_analytical_question = st.text_area(
+    "Задайте ваш вопрос. Например: 'Найди топ-10 импортеров деталей для дронов по сумме' или 'Главные экспортеры пшеницы в Польшу по весу'",
+    key="ai_analytical_question"
+)
+search_button_analytical_ai = st.button("Проанализировать с помощью AI", type="primary")
+
+if search_button_analytical_ai and ai_analytical_question:
+    with st.spinner("✨ AI-аналитик думает и пишет SQL-запрос..."):
+        analytical_sql = get_analytical_ai_query(ai_analytical_question)
+        if analytical_sql:
+            st.subheader("Сгенерированный SQL-запрос:")
+            st.code(analytical_sql, language='sql')
+            with st.spinner("Виконується складний запит..."):
+                analytical_results_df = run_query(analytical_sql)
+                st.subheader("Результат анализа:")
+                st.success(f"Анализ завершен. Найдено {len(analytical_results_df)} записей.")
+                st.dataframe(analytical_results_df)
         else:
-            st.error("Не вдалося згенерувати SQL-запит.")
+            st.error("Не удалось сгенерировать аналитический SQL-запрос.")
 
 st.divider()
 
 # --- СЕКЦИЯ ФИЛЬТРОВ ---
-st.header("📊 Фільтрація та аналіз даних")
+st.header("📊 Фильтрация и ручной поиск данных")
 filter_options = get_filter_options()
+# ... (весь остальной код для фильтров остается без изменений) ...
 with st.expander("Панель Фільтрів", expanded=True):
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -160,7 +157,6 @@ with st.expander("Панель Фільтрів", expanded=True):
         country = st.selectbox("Країна-партнер:", options=filter_options['countries'])
     with col3:
         transport = st.selectbox("Вид транспорту:", options=filter_options['transport'])
-    
     col4, col5, col6 = st.columns(3)
     with col4:
         uktzed = st.text_input("Код УКТЗЕД (можна частину):")
@@ -168,36 +164,24 @@ with st.expander("Панель Фільтрів", expanded=True):
         yedrpou = st.text_input("Код ЄДРПОУ фірми:")
     with col6:
         company = st.text_input("Назва компанії:")
-
     search_button_filters = st.button("🔍 Знайти за фільтрами")
-
-# --- ЛОГИКА ФОРМИРОВАНИЯ ЗАПРОСА И ОТОБРАЖЕНИЯ РЕЗУЛЬТАТОВ ---
 if search_button_filters:
     query_parts = []
-    
     if direction and direction != 'Всі':
         query_parts.append(f"napryamok = '{direction}'")
-    
     if company:
-        with st.spinner("Аналізуємо назву компанії для пошуку..."):
-            translated_company = translate_for_query(company)
-        sanitized_company = translated_company.replace("'", "''").upper()
+        sanitized_company = company.replace("'", "''").upper()
         query_parts.append(f"UPPER(nazva_kompanii) LIKE '%{sanitized_company}%'")
-    
     if country:
         sanitized_country = country.replace("'", "''")
         query_parts.append(f"kraina_partner = '{sanitized_country}'")
-    
     if transport:
         sanitized_transport = transport.replace("'", "''")
         query_parts.append(f"vyd_transportu = '{sanitized_transport}'")
-
     if uktzed:
         query_parts.append(f"kod_uktzed LIKE '{uktzed}%'")
-    
     if yedrpou:
         query_parts.append(f"kod_yedrpou = '{yedrpou}'")
-
     if not query_parts:
         st.warning("Будь ласка, оберіть хоча б один фільтр.")
     else:
