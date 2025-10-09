@@ -17,9 +17,7 @@ TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 
 # --- ФУНКЦИЯ ПРОВЕРКИ ПАРОЛЯ ---
 def check_password():
-    """Returns `True` if the user had a correct password."""
     def password_entered():
-        # Определяем, где запущен код, чтобы правильно получить пароль
         if os.environ.get('K_SERVICE'):
             correct_password = os.environ.get("APP_PASSWORD")
         else:
@@ -43,15 +41,12 @@ def check_password():
 
 # --- ИНИЦИАЛИЗАЦИЯ КЛИЕНТОВ GOOGLE ---
 def initialize_clients():
-    """Initialize BigQuery and GenerativeAI clients and store in session state."""
     if 'clients_initialized' in st.session_state:
         return
     try:
-        # В Cloud Run аутентификация происходит через сервисный аккаунт
         if os.environ.get('K_SERVICE'):
             st.session_state.bq_client = bigquery.Client(project=PROJECT_ID)
             api_key = os.environ.get("GOOGLE_AI_API_KEY")
-        # При локальном запуске можно использовать st.secrets
         else:
             st.session_state.bq_client = bigquery.Client()
             api_key = st.secrets.get("GOOGLE_AI_API_KEY")
@@ -69,7 +64,6 @@ def initialize_clients():
 # --- ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ---
 @st.cache_data(ttl=3600)
 def run_query(query):
-    """Executes a query and returns a pandas DataFrame."""
     if st.session_state.get('client_ready', False):
         try:
             return st.session_state.bq_client.query(query).to_dataframe()
@@ -80,22 +74,12 @@ def run_query(query):
 
 # --- ФУНКЦИЯ ДЛЯ AI-ПОИСКА ---
 def get_ai_search_query(user_query, max_items=100):
-    """Generates a SQL query using the Generative AI model."""
     if not st.session_state.get('genai_ready', False):
-        st.warning("Google AI не ініціалізовано. AI-пошук недоступний.")
         return None
     prompt = f"""
-    Based on the user's request, generate a SQL query for Google BigQuery.
-    The table is `{TABLE_ID}`.
-    Select all fields (*).
-    Use `REGEXP_CONTAINS` with the `(?i)` flag for a case-insensitive search on the `opis_tovaru` field.
-    Limit the results to {max_items}.
-    Return ONLY a valid JSON object with a single key "sql_query" containing the full SQL string.
-
-    User request: "{user_query}"
+    Based on the user's request, generate a SQL query for Google BigQuery. The table is `{TABLE_ID}`. Select all fields (*). Use `REGEXP_CONTAINS` with the `(?i)` flag for a case-insensitive search on the `opis_tovaru` field. Limit the results to {max_items}. Return ONLY a valid JSON object with a single key "sql_query" containing the full SQL string. User request: "{user_query}"
     """
     try:
-        # Используем полное, правильное имя модели
         model = genai.GenerativeModel('models/gemini-pro-latest')
         response = model.generate_content(prompt)
         response_text = response.text.strip().replace("```json", "").replace("```", "")
@@ -108,11 +92,8 @@ def get_ai_search_query(user_query, max_items=100):
 # --- ЗАГРУЗКА СПИСКОВ ДЛЯ ФИЛЬТРОВ ---
 @st.cache_data(ttl=3600)
 def get_filter_options():
-    """Loads options for the filter dropdowns."""
     options = {}
-    # Статические опции
     options['direction'] = ['', 'Імпорт', 'Експорт']
-    # Динамические опции из BigQuery (только для быстрых запросов)
     query_countries = f"SELECT DISTINCT kraina_partner FROM `{TABLE_ID}` WHERE kraina_partner IS NOT NULL ORDER BY kraina_partner"
     options['countries'] = [''] + list(run_query(query_countries)['kraina_partner'])
     query_transport = f"SELECT DISTINCT vyd_transportu FROM `{TABLE_ID}` WHERE vyd_transportu IS NOT NULL ORDER BY vyd_transportu"
@@ -132,9 +113,8 @@ if not st.session_state.get('client_ready', False):
 
 # --- СЕКЦИЯ AI-ПОИСКА ---
 st.header("🤖 Інтелектуальний пошук товарів за описом")
-ai_search_query_text = st.text_input("Опишіть товар, який шукаєте (наприклад, 'кава зернова з Колумбії')", key="ai_search_input")
+ai_search_query_text = st.text_input("Опишіть товар, який шукаєте...", key="ai_search_input")
 search_button_ai = st.button("Знайти за допомогою AI", type="primary")
-
 if search_button_ai and ai_search_query_text:
     with st.spinner("✨ AI генерує запит і шукає дані..."):
         ai_sql = get_ai_search_query(ai_search_query_text)
@@ -151,9 +131,7 @@ st.divider()
 # --- СЕКЦИЯ ФИЛЬТРОВ ---
 st.header("📊 Фільтрація та аналіз даних")
 filter_options = get_filter_options()
-
 with st.expander("Панель Фільтрів", expanded=True):
-    # Первый ряд фильтров
     col1, col2, col3 = st.columns(3)
     with col1:
         direction = st.selectbox("Напрямок:", options=filter_options['direction'])
@@ -161,15 +139,11 @@ with st.expander("Панель Фільтрів", expanded=True):
         country = st.selectbox("Країна-партнер:", options=filter_options['countries'])
     with col3:
         transport = st.selectbox("Вид транспорту:", options=filter_options['transport'])
-
-    # Второй ряд фильтров
     col4, col5 = st.columns([1, 3])
     with col4:
         uktzed = st.text_input("Код УКТЗЕД (можна частину):")
     with col5:
-        # Заменили выпадающий список на текстовое поле для производительности
         company = st.text_input("Назва компанії (можна частину):")
-
     search_button_filters = st.button("🔍 Знайти за фільтрами")
 
 # --- ЛОГИКА ФОРМИРОВАНИЯ ЗАПРОСА И ОТОБРАЖЕНИЯ РЕЗУЛЬТАТОВ ---
@@ -177,20 +151,15 @@ if search_button_filters:
     query_parts = []
     if direction:
         query_parts.append(f"napryamok = '{direction}'")
-    
-    # Исправленный синтаксис для безопасного формирования запроса
     if company:
         sanitized_company = company.replace("'", "''").upper()
         query_parts.append(f"nazva_kompanii LIKE '%{sanitized_company}%'")
-    
     if country:
         sanitized_country = country.replace("'", "''")
         query_parts.append(f"kraina_partner = '{sanitized_country}'")
-    
     if transport:
         sanitized_transport = transport.replace("'", "''")
         query_parts.append(f"vyd_transportu = '{sanitized_transport}'")
-
     if uktzed:
         query_parts.append(f"kod_uktzed LIKE '{uktzed}%'")
 
