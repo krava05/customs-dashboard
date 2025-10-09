@@ -1,10 +1,10 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 2.1
+# Версия: 2.2
 # Дата: 2025-10-09
 # Описание: 
-# - Исправлена критическая ошибка синтаксиса (SyntaxError) при 
-#   обработке множественного выбора в фильтрах.
+# - Финальная версия с исправлением всех синтаксических ошибок (f-string).
+# - Включает AI-Аналитик и панель фильтров с множественным выбором.
 # ===============================================
 
 import os
@@ -15,7 +15,7 @@ import google.generativeai as genai
 import json
 from datetime import datetime
 
-# --- КОНФИГУРАЦІЯ СТОРІНКИ ---
+# --- КОНФИГУРАЦИЯ СТРАНИЦЫ ---
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 
 # --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
@@ -159,7 +159,7 @@ with st.expander("Панель Фильтров и Поиска", expanded=True)
             if ai_sql:
                 st.code(ai_sql, language='sql')
                 ai_results_df = run_query(ai_sql)
-                st.success(f"Найдено {len(ai_results_df)} записей.")
+                st.success(f"Найдено {len(ai_results_df)} записів.")
                 st.dataframe(ai_results_df)
             else:
                 st.error("Не удалось сгенерировать SQL-запрос.")
@@ -201,17 +201,18 @@ if search_button_filters:
     def process_text_input(input_str):
         return [item.strip() for item in input_str.split(',') if item.strip()]
 
-    # <<< ИСПРАВЛЕНИЕ ЗДЕСЬ >>>
+    # --- ИСПРАВЛЕННАЯ ЛОГИКА ---
     if selected_directions:
-        sanitized_list = [f"'{d.replace(\"'\", \"''\")}'" for d in selected_directions]
+        # Сначала подготавливаем список, правильно экранируя кавычки, потом объединяем
+        sanitized_list = [f"'{d.replace('\'', '\'\'')}'" for d in selected_directions]
         query_parts.append(f"napryamok IN ({', '.join(sanitized_list)})")
     
     if selected_countries:
-        sanitized_list = [f"'{c.replace(\"'\", \"''\")}'" for c in selected_countries]
+        sanitized_list = [f"'{c.replace('\'', '\'\'')}'" for c in selected_countries]
         query_parts.append(f"kraina_partner IN ({', '.join(sanitized_list)})")
 
     if selected_transports:
-        sanitized_list = [f"'{t.replace(\"'\", \"''\")}'" for t in selected_transports]
+        sanitized_list = [f"'{t.replace('\'', '\'\'')}'" for t in selected_transports]
         query_parts.append(f"vyd_transportu IN ({', '.join(sanitized_list)})")
 
     if selected_years:
@@ -225,18 +226,19 @@ if search_button_filters:
 
     uktzed_list = process_text_input(uktzed_input)
     if uktzed_list:
-        uktzed_conditions = ' OR '.join([f"kod_uktzed LIKE '{item.replace(\"'\", \"''\")}%'" for item in uktzed_list])
-        query_parts.append(f"({uktzed_conditions})")
+        # Для LIKE нужно строить несколько условий через OR
+        sanitized_conditions = [f"kod_uktzed LIKE '{item.replace('\'', '\'\'')}%'" for item in uktzed_list]
+        query_parts.append(f"({' OR '.join(sanitized_conditions)})")
 
     yedrpou_list = process_text_input(yedrpou_input)
     if yedrpou_list:
-        sanitized_list = [f"'{item.replace(\"'\", \"''\")}'" for item in yedrpou_list]
+        sanitized_list = [f"'{item.replace('\'', '\'\'')}'" for item in yedrpou_list]
         query_parts.append(f"kod_yedrpou IN ({', '.join(sanitized_list)})")
 
     company_list = process_text_input(company_input)
     if company_list:
-        company_conditions = ' OR '.join([f"UPPER(nazva_kompanii) LIKE '%{item.replace(\"'\", \"''\").upper()}%'" for item in company_list])
-        query_parts.append(f"({company_conditions})")
+        sanitized_conditions = [f"UPPER(nazva_kompanii) LIKE '%{item.replace('\'', '\'\'').upper()}%'" for item in company_list]
+        query_parts.append(f"({' OR '.join(sanitized_conditions)})")
 
     if not query_parts:
         st.warning("Будь ласка, оберіть хоча б один фільтр.")
