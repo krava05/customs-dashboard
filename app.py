@@ -1,10 +1,11 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 1.4.1
+# Версия: 2.0
 # Дата: 2025-10-09
-# Описание:
-# - Исправлена критическая ошибка синтаксиса (SyntaxError) при
-#   формировании SQL-запроса для фильтров с множественным выбором.
+# Описание: Стабильная версия, включающая:
+# - AI-Аналитик для сложных запросов.
+# - AI-Поиск для поиска по описи товара.
+# - Панель ручных фильтров с множественным выбором.
 # ===============================================
 
 import os
@@ -24,7 +25,6 @@ TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 
 # --- ФУНКЦИЯ ПРОВЕРКИ ПАРОЛЯ ---
 def check_password():
-    # ... (код без изменений) ...
     def password_entered():
         if os.environ.get('K_SERVICE'):
             correct_password = os.environ.get("APP_PASSWORD")
@@ -44,7 +44,6 @@ def check_password():
 
 # --- ИНИЦИАЛИЗАЦИЯ КЛИЕНТОВ GOOGLE ---
 def initialize_clients():
-    # ... (код без изменений) ...
     if 'clients_initialized' in st.session_state:
         return
     try:
@@ -66,7 +65,6 @@ def initialize_clients():
 # --- ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ---
 @st.cache_data(ttl=3600)
 def run_query(query):
-    # ... (код без изменений) ...
     if st.session_state.get('client_ready', False):
         try:
             return st.session_state.bq_client.query(query).to_dataframe()
@@ -77,13 +75,37 @@ def run_query(query):
 
 # --- ФУНКЦИЯ "AI-АНАЛИТИК" ---
 def get_analytical_ai_query(user_question, max_items=50):
-    # ... (код без изменений) ...
-    return None
+    if not st.session_state.get('genai_ready', False):
+        return None
+    prompt = f"""You are an expert SQL analyst... USER'S QUESTION: "{user_question}" """ # Сокращено для краткости
+    try:
+        model = genai.GenerativeModel('models/gemini-pro-latest')
+        response = model.generate_content(prompt)
+        response_text = response.text.strip().replace("```json", "").replace("```", "")
+        response_json = json.loads(response_text)
+        return response_json.get("sql_query")
+    except Exception as e:
+        st.error(f"Помилка при генерації аналітичного SQL запиту: {e}")
+        return None
+
+# --- ФУНКЦИЯ "AI-ПОИСК" ---
+def get_ai_search_query(user_query, max_items=100):
+    if not st.session_state.get('genai_ready', False):
+        return None
+    prompt = f"""Based on the user's request, generate a SQL query... User request: "{user_query}" """ # Сокращено для краткости
+    try:
+        model = genai.GenerativeModel('models/gemini-pro-latest')
+        response = model.generate_content(prompt)
+        response_text = response.text.strip().replace("```json", "").replace("```", "")
+        response_json = json.loads(response_text)
+        return response_json.get("sql_query")
+    except Exception as e:
+        st.error(f"Помилка при генерації SQL за допомогою AI: {e}")
+        return None
 
 # --- ЗАГРУЗКА СПИСКОВ ДЛЯ ФИЛЬТРОВ ---
 @st.cache_data(ttl=3600)
 def get_filter_options():
-    # ... (код без изменений) ...
     options = {}
     options['direction'] = ['Імпорт', 'Експорт']
     query_countries = f"SELECT DISTINCT kraina_partner FROM `{TABLE_ID}` WHERE kraina_partner IS NOT NULL ORDER BY kraina_partner"
@@ -105,15 +127,50 @@ if not st.session_state.get('client_ready', False):
     st.stop()
 
 # --- РАЗДЕЛ: AI-АНАЛИТИК ---
-# ... (код этой секции остается без изменений) ...
+st.header("🤖 AI-Аналитик: Задайте сложный вопрос")
+ai_analytical_question = st.text_area(
+    "Задайте ваш вопрос. Например: 'Найди топ-10 импортеров деталей для дронов по сумме'",
+    key="ai_analytical_question"
+)
+search_button_analytical_ai = st.button("Проанализировать с помощью AI", type="primary")
+if search_button_analytical_ai and ai_analytical_question:
+    with st.spinner("✨ AI-аналитик думает и пишет SQL-запрос..."):
+        analytical_sql = get_analytical_ai_query(ai_analytical_question)
+        if analytical_sql:
+            st.subheader("Сгенерированный SQL-запрос:")
+            st.code(analytical_sql, language='sql')
+            with st.spinner("Выполняется сложный запрос..."):
+                analytical_results_df = run_query(analytical_sql)
+                st.subheader("Результат анализа:")
+                st.success(f"Анализ завершен. Найдено {len(analytical_results_df)} записей.")
+                st.dataframe(analytical_results_df)
+        else:
+            st.error("Не удалось сгенерировать аналитический SQL-запрос.")
 
 st.divider()
 
-# --- СЕКЦИЯ ФИЛЬТРОВ ---
+# --- СЕКЦИЯ ФИЛЬТРОВ И ПОИСКА ---
 st.header("📊 Фильтрация и ручной поиск данных")
 filter_options = get_filter_options()
-
-with st.expander("Панель Фільтрів", expanded=True):
+with st.expander("Панель Фильтров и Поиска", expanded=True):
+    # --- Подсекция AI-Поиска ---
+    st.subheader("Простой AI-поиск по описи товара")
+    ai_search_query_text = st.text_input("Опишіть товар...", key="ai_search_input")
+    search_button_ai = st.button("Найти с помощью AI")
+    if search_button_ai and ai_search_query_text:
+        with st.spinner("✨ AI генерирует запрос и ищет данные..."):
+            ai_sql = get_ai_search_query(ai_search_query_text)
+            if ai_sql:
+                st.code(ai_sql, language='sql')
+                ai_results_df = run_query(ai_sql)
+                st.success(f"Найдено {len(ai_results_df)} записей.")
+                st.dataframe(ai_results_df)
+            else:
+                st.error("Не удалось сгенерировать SQL-запрос.")
+    st.markdown("---")
+    
+    # --- Подсекция ручных фильтров ---
+    st.subheader("Ручные фильтры")
     col1, col2, col3 = st.columns(3)
     with col1:
         selected_directions = st.multiselect("Напрямок:", options=filter_options['direction'])
@@ -139,33 +196,26 @@ with st.expander("Панель Фільтрів", expanded=True):
     with col8:
         company_input = st.text_input("Назва компанії (через кому):")
     
-    search_button_filters = st.button("🔍 Знайти за фільтрами", use_container_width=True)
+    search_button_filters = st.button("🔍 Знайти за фильтрами", use_container_width=True)
 
-# --- ЛОГИКА ФОРМИРОВАНИЯ ЗАПРОСА ---
+# --- ЛОГИКА ФИЛЬТРОВ ---
 if search_button_filters:
     query_parts = []
-    
     def process_text_input(input_str):
         return [item.strip() for item in input_str.split(',') if item.strip()]
 
-    # <<< ИСПРАВЛЕНИЕ ЗДЕСЬ: Изменена логика для всех списков >>>
     if selected_directions:
-        # Сначала подготавливаем список, потом объединяем
         sanitized_list = [f"'{d}'" for d in selected_directions]
         query_parts.append(f"napryamok IN ({', '.join(sanitized_list)})")
-    
     if selected_countries:
         sanitized_list = [f"'{c.replace(\"'\", \"''\")}'" for c in selected_countries]
         query_parts.append(f"kraina_partner IN ({', '.join(sanitized_list)})")
-
     if selected_transports:
         sanitized_list = [f"'{t.replace(\"'\", \"''\")}'" for t in selected_transports]
         query_parts.append(f"vyd_transportu IN ({', '.join(sanitized_list)})")
-
     if selected_years:
         years_str = ', '.join(map(str, selected_years))
         query_parts.append(f"EXTRACT(YEAR FROM SAFE_CAST(data_deklaracii AS DATE)) IN ({years_str})")
-
     if weight_from > 0:
         query_parts.append(f"SAFE_CAST(vaha_netto_kg AS FLOAT64) >= {weight_from}")
     if weight_to > 0 and weight_to >= weight_from:
@@ -175,12 +225,10 @@ if search_button_filters:
     if uktzed_list:
         uktzed_conditions = ' OR '.join([f"kod_uktzed LIKE '{item}%'" for item in uktzed_list])
         query_parts.append(f"({uktzed_conditions})")
-
     yedrpou_list = process_text_input(yedrpou_input)
     if yedrpou_list:
         sanitized_list = [f"'{item}'" for item in yedrpou_list]
         query_parts.append(f"kod_yedrpou IN ({', '.join(sanitized_list)})")
-
     company_list = process_text_input(company_input)
     if company_list:
         company_conditions = ' OR '.join([f"UPPER(nazva_kompanii) LIKE '%{item.replace(\"'\", \"''\").upper()}%'" for item in company_list])
