@@ -76,7 +76,6 @@ def run_query(query):
 def get_ai_search_query(user_query, max_items=100):
     if not st.session_state.get('genai_ready', False):
         return None
-    # ИЗМЕНЕНИЕ: Добавили инструкцию для AI о возможном различии языков
     prompt = f"""
     Based on the user's request, generate a SQL query for Google BigQuery.
     The table is `{TABLE_ID}`.
@@ -107,7 +106,6 @@ def translate_for_query(text_to_translate):
         prompt = f"Translate the following text to Ukrainian for a database search. Return ONLY the translated text. If the text is a proper name or already in Ukrainian, return it unchanged. Text: '{text_to_translate}'"
         model = genai.GenerativeModel('models/gemini-pro-latest')
         response = model.generate_content(prompt)
-        # Убираем возможные кавычки из ответа модели
         return response.text.strip().strip('"').strip("'")
     except Exception:
         return text_to_translate
@@ -116,7 +114,7 @@ def translate_for_query(text_to_translate):
 @st.cache_data(ttl=3600)
 def get_filter_options():
     options = {}
-    # ИЗМЕНЕНИЕ: Добавили 'Всі'
+    # **ИЗМЕНЕНИЕ: Добавили опцию "Всі"**
     options['direction'] = ['Всі', 'Імпорт', 'Експорт']
     query_countries = f"SELECT DISTINCT kraina_partner FROM `{TABLE_ID}` WHERE kraina_partner IS NOT NULL ORDER BY kraina_partner"
     options['countries'] = [''] + list(run_query(query_countries)['kraina_partner'])
@@ -156,7 +154,6 @@ st.divider()
 st.header("📊 Фільтрація та аналіз даних")
 filter_options = get_filter_options()
 with st.expander("Панель Фільтрів", expanded=True):
-    # ИЗМЕНЕНИЕ: Перекомпоновали фильтры в 2 ряда по 3
     col1, col2, col3 = st.columns(3)
     with col1:
         direction = st.selectbox("Напрямок:", options=filter_options['direction'])
@@ -169,7 +166,7 @@ with st.expander("Панель Фільтрів", expanded=True):
     with col4:
         uktzed = st.text_input("Код УКТЗЕД (можна частину):")
     with col5:
-        # НОВЫЙ ФИЛЬТР
+        # **ИЗМЕНЕНИЕ: Добавили фильтр по коду фирмы**
         yedrpou = st.text_input("Код ЄДРПОУ фірми:")
     with col6:
         company = st.text_input("Назва компанії (можна російською):")
@@ -180,6 +177,7 @@ with st.expander("Панель Фільтрів", expanded=True):
 if search_button_filters:
     query_parts = []
     
+    # **ИЗМЕНЕНИЕ: Учли опцию "Всі"**
     if direction and direction != 'Всі':
         query_parts.append(f"napryamok = '{direction}'")
     
@@ -199,7 +197,8 @@ if search_button_filters:
 
     if uktzed:
         query_parts.append(f"kod_uktzed LIKE '{uktzed}%'")
-
+    
+    # **ИЗМЕНЕНИЕ: Добавили логику для кода фирмы**
     if yedrpou:
         query_parts.append(f"kod_yedrpou = '{yedrpou}'")
 
