@@ -114,7 +114,6 @@ def translate_for_query(text_to_translate):
 @st.cache_data(ttl=3600)
 def get_filter_options():
     options = {}
-    # **ИЗМЕНЕНИЕ: Добавили опцию "Всі"**
     options['direction'] = ['Всі', 'Імпорт', 'Експорт']
     query_countries = f"SELECT DISTINCT kraina_partner FROM `{TABLE_ID}` WHERE kraina_partner IS NOT NULL ORDER BY kraina_partner"
     options['countries'] = [''] + list(run_query(query_countries)['kraina_partner'])
@@ -135,7 +134,8 @@ if not st.session_state.get('client_ready', False):
 
 # --- СЕКЦИЯ AI-ПОИСКА ---
 st.header("🤖 Інтелектуальний пошук товарів за описом")
-ai_search_query_text = st.text_input("Опишіть товар (можна російською)...", key="ai_search_input")
+# ИЗМЕНЕНИЕ: Убрали "(можна російською)"
+ai_search_query_text = st.text_input("Опишіть товар...", key="ai_search_input")
 search_button_ai = st.button("Знайти за допомогою AI", type="primary")
 if search_button_ai and ai_search_query_text:
     with st.spinner("✨ AI генерує запит і шукає дані..."):
@@ -166,10 +166,10 @@ with st.expander("Панель Фільтрів", expanded=True):
     with col4:
         uktzed = st.text_input("Код УКТЗЕД (можна частину):")
     with col5:
-        # **ИЗМЕНЕНИЕ: Добавили фильтр по коду фирмы**
         yedrpou = st.text_input("Код ЄДРПОУ фірми:")
     with col6:
-        company = st.text_input("Назва компанії (можна російською):")
+        # ИЗМЕНЕНИЕ: Убрали "(можна російською)"
+        company = st.text_input("Назва компанії:")
 
     search_button_filters = st.button("🔍 Знайти за фільтрами")
 
@@ -177,12 +177,11 @@ with st.expander("Панель Фільтрів", expanded=True):
 if search_button_filters:
     query_parts = []
     
-    # **ИЗМЕНЕНИЕ: Учли опцию "Всі"**
     if direction and direction != 'Всі':
         query_parts.append(f"napryamok = '{direction}'")
     
     if company:
-        with st.spinner("Перекладаємо назву компанії для пошуку..."):
+        with st.spinner("Аналізуємо назву компанії для пошуку..."):
             translated_company = translate_for_query(company)
         sanitized_company = translated_company.replace("'", "''").upper()
         query_parts.append(f"UPPER(nazva_kompanii) LIKE '%{sanitized_company}%'")
@@ -198,7 +197,6 @@ if search_button_filters:
     if uktzed:
         query_parts.append(f"kod_uktzed LIKE '{uktzed}%'")
     
-    # **ИЗМЕНЕНИЕ: Добавили логику для кода фирмы**
     if yedrpou:
         query_parts.append(f"kod_yedrpou = '{yedrpou}'")
 
