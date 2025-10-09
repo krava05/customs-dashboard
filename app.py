@@ -149,7 +149,6 @@ st.divider()
 st.header("📊 Фильтрация и ручной поиск данных")
 filter_options = get_filter_options()
 with st.expander("Панель Фильтров и Поиска", expanded=True):
-    # --- Подсекция AI-Поиска ---
     st.subheader("Простой AI-поиск по описи товара")
     ai_search_query_text = st.text_input("Опишіть товар...", key="ai_search_input")
     search_button_ai = st.button("Найти с помощью AI")
@@ -165,7 +164,6 @@ with st.expander("Панель Фильтров и Поиска", expanded=True)
                 st.error("Не удалось сгенерировать SQL-запрос.")
     st.markdown("---")
     
-    # --- Подсекция ручных фильтров ---
     st.subheader("Ручные фильтры")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -199,9 +197,8 @@ if search_button_filters:
     query_parts = []
     
     def process_text_input(input_str):
-        return [item.strip() for item in input_str.split(',') if item.strip()]
+        return [item.strip().replace("'", "''") for item in input_str.split(',') if item.strip()]
 
-    # <<< ОКОНЧАТЕЛЬНОЕ ИСПРАВЛЕНИЕ СИНТАКСИСА ЗДЕСЬ >>>
     if selected_directions:
         sanitized_list = [f"'{d.replace('\'', '\'\'')}'" for d in selected_directions]
         query_parts.append(f"napryamok IN ({', '.join(sanitized_list)})")
@@ -225,18 +222,18 @@ if search_button_filters:
 
     uktzed_list = process_text_input(uktzed_input)
     if uktzed_list:
-        sanitized_conditions = [f"kod_uktzed LIKE '{item.replace('\'', '\'\'')}%'" for item in uktzed_list]
-        query_parts.append(f"({' OR '.join(sanitized_conditions)})")
+        uktzed_conditions = [f"kod_uktzed LIKE '{item}%'" for item in uktzed_list]
+        query_parts.append(f"({' OR '.join(uktzed_conditions)})")
 
     yedrpou_list = process_text_input(yedrpou_input)
     if yedrpou_list:
-        sanitized_list = [f"'{item.replace('\'', '\'\'')}'" for item in yedrpou_list]
+        sanitized_list = [f"'{item}'" for item in yedrpou_list]
         query_parts.append(f"kod_yedrpou IN ({', '.join(sanitized_list)})")
 
     company_list = process_text_input(company_input)
     if company_list:
-        sanitized_conditions = [f"UPPER(nazva_kompanii) LIKE '%{item.replace('\'', '\'\'').upper()}%'" for item in company_list]
-        query_parts.append(f"({' OR '.join(sanitized_conditions)})")
+        company_conditions = [f"UPPER(nazva_kompanii) LIKE '%{item.upper()}%'" for item in company_list]
+        query_parts.append(f"({' OR '.join(company_conditions)})")
 
     if not query_parts:
         st.warning("Будь ласка, оберіть хоча б один фільтр.")
