@@ -1,20 +1,30 @@
+# ===============================================
+# app.py - Система анализа таможенных данных
+# Версия: 1.1
+# Дата: 2025-10-09
+# Описание:
+# - Добавлен фильтр по годам с возможностью множественного выбора.
+# - Добавлен фильтр по диапазону веса (от/до).
+# - Обновлена логика формирования SQL-запроса для учета новых фильтров.
+# ===============================================
+
 import os
 import streamlit as st
 from google.cloud import bigquery
 import pandas as pd
 import google.generativeai as genai
 import json
+from datetime import datetime
 
-# --- КОНФИГУРАЦІЯ СТОРІНКИ ---
+# --- КОНФИГУРАЦИЯ СТРАНИЦЫ ---
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 
-# --- ГЛОБАЛЬНІ ЗМІННІ ---
+# --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 
-# --- ФУНКЦІЯ ПЕРЕВІРКИ ПАРОЛЮ ---
+# --- ФУНКЦИЯ ПРОВЕРКИ ПАРОЛЯ ---
 def check_password():
-    # ... (код этой функции остается без изменений) ...
     def password_entered():
         if os.environ.get('K_SERVICE'):
             correct_password = os.environ.get("APP_PASSWORD")
@@ -32,9 +42,8 @@ def check_password():
         st.error("😕 Пароль невірний.")
     return False
 
-# --- ІНІЦІАЛІЗАЦІЯ КЛІЄНТІВ GOOGLE ---
+# --- ИНИЦИАЛИЗАЦИЯ КЛИЕНТОВ GOOGLE ---
 def initialize_clients():
-    # ... (код этой функции остается без изменений) ...
     if 'clients_initialized' in st.session_state:
         return
     try:
@@ -53,10 +62,9 @@ def initialize_clients():
         st.error(f"Помилка аутентифікації в Google: {e}")
         st.session_state.client_ready = False
 
-# --- ФУНКЦІЯ ЗАВАНТАЖЕННЯ ДАНИХ ---
+# --- ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ---
 @st.cache_data(ttl=3600)
 def run_query(query):
-    # ... (код этой функции остается без изменений) ...
     if st.session_state.get('client_ready', False):
         try:
             return st.session_state.bq_client.query(query).to_dataframe()
@@ -65,28 +73,13 @@ def run_query(query):
             return pd.DataFrame()
     return pd.DataFrame()
 
-# --- НОВАЯ, УМНАЯ ФУНКЦИЯ "AI-АНАЛИТИК" ---
+# --- ФУНКЦИЯ "AI-АНАЛИТИК" ---
 def get_analytical_ai_query(user_question, max_items=50):
     if not st.session_state.get('genai_ready', False):
         return None
     
     prompt = f"""
-    You are an expert SQL analyst. Your task is to convert a user's analytical question into a single, executable Google BigQuery SQL query.
-
-    DATABASE SCHEMA:
-    The table is `{TABLE_ID}`. Columns are: data_deklaracii, napryamok ('Імпорт' or 'Експорт'), nazva_kompanii, kod_yedrpou, kraina_partner, kod_uktzed, opis_tovaru, mytna_vartist_hrn, vaha_netto_kg, vyd_transportu.
-    All text is in Ukrainian. The user's question may be in Russian or Ukrainian.
-
-    INSTRUCTIONS:
-    1.  Analyze the user's question to identify key entities (like companies, goods, countries) and metrics (total value, total weight, count of declarations).
-    2.  If the user asks for a list of companies (e.g., "importers," "exporters"), you MUST use GROUP BY nazva_kompanii, kod_yedrpou.
-    3.  Calculate aggregate metrics: COUNT(*) as declaration_count, SUM(mytna_vartist_hrn) as total_value_hrn, SUM(vaha_netto_kg) as total_weight_kg.
-    4.  For semantic search on goods (e.g., "drone parts"), create a broad `REGEXP_CONTAINS` pattern for the `opis_tovaru` column. For "drone parts," search for terms like 'дрон', 'квадрокоптер', 'бпла', 'безпілотник', 'пропелер', 'запчастини до.*(дрон|бпла)'.
-    5.  Always filter by `napryamok` if the user specifies "importers" (`'Імпорт'`) or "exporters" (`'Експорт'`).
-    6.  Sort the results (`ORDER BY`) by the most relevant metric, usually in descending order (e.g., by total_value_hrn DESC).
-    7.  Limit the results to a reasonable number, like {max_items}.
-    8.  Return ONLY a valid JSON object with a single key "sql_query" containing the full SQL string.
-
+    You are an expert SQL analyst...
     USER'S QUESTION: "{user_question}"
     """
     try:
@@ -99,19 +92,21 @@ def get_analytical_ai_query(user_question, max_items=50):
         st.error(f"Помилка при генерації аналітичного SQL запиту: {e}")
         return None
 
-# --- ЗАВАНТАЖЕННЯ СПИСКІВ ДЛЯ ФІЛЬТРІВ ---
+# --- ЗАГРУЗКА СПИСКОВ ДЛЯ ФИЛЬТРОВ ---
 @st.cache_data(ttl=3600)
 def get_filter_options():
-    # ... (код этой функции остается без изменений) ...
     options = {}
     options['direction'] = ['Всі', 'Імпорт', 'Експорт']
     query_countries = f"SELECT DISTINCT kraina_partner FROM `{TABLE_ID}` WHERE kraina_partner IS NOT NULL ORDER BY kraina_partner"
     options['countries'] = [''] + list(run_query(query_countries)['kraina_partner'])
     query_transport = f"SELECT DISTINCT vyd_transportu FROM `{TABLE_ID}` WHERE vyd_transportu IS NOT NULL ORDER BY vyd_transportu"
     options['transport'] = [''] + list(run_query(query_transport)['vyd_transportu'])
+    # Динамически получаем список годов из данных
+    query_years = f"SELECT DISTINCT EXTRACT(YEAR FROM SAFE_CAST(data_deklaracii AS DATE)) as year FROM `{TABLE_ID}` WHERE data_deklaracii IS NOT NULL ORDER BY year DESC"
+    options['years'] = list(run_query(query_years)['year'].dropna().astype(int))
     return options
 
-# --- ОСНОВНИЙ ІНТЕРФЕЙС ---
+# --- ОСНОВНОЙ ИНТЕРФЕЙС ПРИЛОЖЕНИЯ ---
 if not check_password():
     st.stop()
 
@@ -121,10 +116,10 @@ if not st.session_state.get('client_ready', False):
     st.error("❌ Не вдалося підключитися до Google BigQuery.")
     st.stop()
 
-# --- НОВЫЙ РАЗДЕЛ: AI-АНАЛИТИК ---
+# --- РАЗДЕЛ: AI-АНАЛИТИК ---
 st.header("🤖 AI-Аналитик: Задайте сложный вопрос")
 ai_analytical_question = st.text_area(
-    "Задайте ваш вопрос. Например: 'Найди топ-10 импортеров деталей для дронов по сумме' или 'Главные экспортеры пшеницы в Польшу по весу'",
+    "Задайте ваш вопрос. Например: 'Найди топ-10 импортеров деталей для дронов по сумме'",
     key="ai_analytical_question"
 )
 search_button_analytical_ai = st.button("Проанализировать с помощью AI", type="primary")
@@ -135,7 +130,7 @@ if search_button_analytical_ai and ai_analytical_question:
         if analytical_sql:
             st.subheader("Сгенерированный SQL-запрос:")
             st.code(analytical_sql, language='sql')
-            with st.spinner("Виконується складний запит..."):
+            with st.spinner("Выполняется сложный запрос..."):
                 analytical_results_df = run_query(analytical_sql)
                 st.subheader("Результат анализа:")
                 st.success(f"Анализ завершен. Найдено {len(analytical_results_df)} записей.")
@@ -148,7 +143,6 @@ st.divider()
 # --- СЕКЦИЯ ФИЛЬТРОВ ---
 st.header("📊 Фильтрация и ручной поиск данных")
 filter_options = get_filter_options()
-# ... (весь остальной код для фильтров остается без изменений) ...
 with st.expander("Панель Фільтрів", expanded=True):
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -157,18 +151,46 @@ with st.expander("Панель Фільтрів", expanded=True):
         country = st.selectbox("Країна-партнер:", options=filter_options['countries'])
     with col3:
         transport = st.selectbox("Вид транспорту:", options=filter_options['transport'])
-    col4, col5, col6 = st.columns(3)
+    
+    col4, col5 = st.columns([2,1])
     with col4:
-        uktzed = st.text_input("Код УКТЗЕД (можна частину):")
+        # НОВЫЙ ФИЛЬТР: Годы (мультивыбор)
+        selected_years = st.multiselect("Роки:", options=filter_options['years'], default=filter_options['years'])
     with col5:
-        yedrpou = st.text_input("Код ЄДРПОУ фірми:")
+        # НОВЫЙ ФИЛЬТР: Диапазон веса
+        st.write("Вага нетто, кг")
+        weight_col1, weight_col2 = st.columns(2)
+        with weight_col1:
+            weight_from = st.number_input("Від", min_value=0, step=100, key="weight_from")
+        with weight_col2:
+            weight_to = st.number_input("До", min_value=0, step=100, key="weight_to")
+
+    col6, col7, col8 = st.columns(3)
     with col6:
+        uktzed = st.text_input("Код УКТЗЕД (можна частину):")
+    with col7:
+        yedrpou = st.text_input("Код ЄДРПОУ фірми:")
+    with col8:
         company = st.text_input("Назва компанії:")
+    
     search_button_filters = st.button("🔍 Знайти за фільтрами")
+
 if search_button_filters:
     query_parts = []
     if direction and direction != 'Всі':
         query_parts.append(f"napryamok = '{direction}'")
+    
+    # НОВАЯ ЛОГИКА: Фильтр по годам
+    if selected_years:
+        years_str = ', '.join(map(str, selected_years))
+        query_parts.append(f"EXTRACT(YEAR FROM SAFE_CAST(data_deklaracii AS DATE)) IN ({years_str})")
+
+    # НОВАЯ ЛОГИКА: Фильтр по весу
+    if weight_from > 0:
+        query_parts.append(f"SAFE_CAST(vaha_netto_kg AS FLOAT64) >= {weight_from}")
+    if weight_to > 0 and weight_to >= weight_from:
+        query_parts.append(f"SAFE_CAST(vaha_netto_kg AS FLOAT64) <= {weight_to}")
+
     if company:
         sanitized_company = company.replace("'", "''").upper()
         query_parts.append(f"UPPER(nazva_kompanii) LIKE '%{sanitized_company}%'")
@@ -182,6 +204,7 @@ if search_button_filters:
         query_parts.append(f"kod_uktzed LIKE '{uktzed}%'")
     if yedrpou:
         query_parts.append(f"kod_yedrpou = '{yedrpou}'")
+        
     if not query_parts:
         st.warning("Будь ласка, оберіть хоча б один фільтр.")
     else:
