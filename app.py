@@ -76,8 +76,17 @@ def run_query(query):
 def get_ai_search_query(user_query, max_items=100):
     if not st.session_state.get('genai_ready', False):
         return None
+    # ИЗМЕНЕНИЕ: Добавили инструкцию для AI о возможном различии языков
     prompt = f"""
-    Based on the user's request, generate a SQL query for Google BigQuery. The table is `{TABLE_ID}`. Select all fields (*). Use `REGEXP_CONTAINS` with the `(?i)` flag for a case-insensitive search on the `opis_tovaru` field. Limit the results to {max_items}. Return ONLY a valid JSON object with a single key "sql_query" containing the full SQL string. User request: "{user_query}"
+    Based on the user's request, generate a SQL query for Google BigQuery.
+    The table is `{TABLE_ID}`.
+    The `opis_tovaru` column is in Ukrainian. The user's request might be in Russian. Account for this language difference when creating the search pattern.
+    Select all fields (*).
+    Use `REGEXP_CONTAINS` with the `(?i)` flag for a case-insensitive search on the `opis_tovaru` field.
+    Limit the results to {max_items}.
+    Return ONLY a valid JSON object with a single key "sql_query" containing the full SQL string.
+
+    User request: "{user_query}"
     """
     try:
         model = genai.GenerativeModel('models/gemini-pro-latest')
@@ -89,11 +98,26 @@ def get_ai_search_query(user_query, max_items=100):
         st.error(f"Помилка при генерації SQL за допомогою AI: {e}")
         return None
 
+# --- НОВАЯ ФУНКЦИЯ ПЕРЕВОДА ДЛЯ ФИЛЬТРОВ ---
+@st.cache_data(ttl=3600)
+def translate_for_query(text_to_translate):
+    if not st.session_state.get('genai_ready', False) or not text_to_translate:
+        return text_to_translate
+    try:
+        prompt = f"Translate the following text to Ukrainian for a database search. Return ONLY the translated text. If the text is a proper name or already in Ukrainian, return it unchanged. Text: '{text_to_translate}'"
+        model = genai.GenerativeModel('models/gemini-pro-latest')
+        response = model.generate_content(prompt)
+        # Убираем возможные кавычки из ответа модели
+        return response.text.strip().strip('"').strip("'")
+    except Exception:
+        return text_to_translate
+
 # --- ЗАГРУЗКА СПИСКОВ ДЛЯ ФИЛЬТРОВ ---
 @st.cache_data(ttl=3600)
 def get_filter_options():
     options = {}
-    options['direction'] = ['', 'Імпорт', 'Експорт']
+    # ИЗМЕНЕНИЕ: Добавили 'Всі'
+    options['direction'] = ['Всі', 'Імпорт', 'Експорт']
     query_countries = f"SELECT DISTINCT kraina_partner FROM `{TABLE_ID}` WHERE kraina_partner IS NOT NULL ORDER BY kraina_partner"
     options['countries'] = [''] + list(run_query(query_countries)['kraina_partner'])
     query_transport = f"SELECT DISTINCT vyd_transportu FROM `{TABLE_ID}` WHERE vyd_transportu IS NOT NULL ORDER BY vyd_transportu"
@@ -113,7 +137,7 @@ if not st.session_state.get('client_ready', False):
 
 # --- СЕКЦИЯ AI-ПОИСКА ---
 st.header("🤖 Інтелектуальний пошук товарів за описом")
-ai_search_query_text = st.text_input("Опишіть товар, який шукаєте...", key="ai_search_input")
+ai_search_query_text = st.text_input("Опишіть товар (можна російською)...", key="ai_search_input")
 search_button_ai = st.button("Знайти за допомогою AI", type="primary")
 if search_button_ai and ai_search_query_text:
     with st.spinner("✨ AI генерує запит і шукає дані..."):
@@ -132,6 +156,7 @@ st.divider()
 st.header("📊 Фільтрація та аналіз даних")
 filter_options = get_filter_options()
 with st.expander("Панель Фільтрів", expanded=True):
+    # ИЗМЕНЕНИЕ: Перекомпоновали фильтры в 2 ряда по 3
     col1, col2, col3 = st.columns(3)
     with col1:
         direction = st.selectbox("Напрямок:", options=filter_options['direction'])
@@ -139,29 +164,44 @@ with st.expander("Панель Фільтрів", expanded=True):
         country = st.selectbox("Країна-партнер:", options=filter_options['countries'])
     with col3:
         transport = st.selectbox("Вид транспорту:", options=filter_options['transport'])
-    col4, col5 = st.columns([1, 3])
+    
+    col4, col5, col6 = st.columns(3)
     with col4:
         uktzed = st.text_input("Код УКТЗЕД (можна частину):")
     with col5:
-        company = st.text_input("Назва компанії (можна частину):")
+        # НОВЫЙ ФИЛЬТР
+        yedrpou = st.text_input("Код ЄДРПОУ фірми:")
+    with col6:
+        company = st.text_input("Назва компанії (можна російською):")
+
     search_button_filters = st.button("🔍 Знайти за фільтрами")
 
 # --- ЛОГИКА ФОРМИРОВАНИЯ ЗАПРОСА И ОТОБРАЖЕНИЯ РЕЗУЛЬТАТОВ ---
 if search_button_filters:
     query_parts = []
-    if direction:
+    
+    if direction and direction != 'Всі':
         query_parts.append(f"napryamok = '{direction}'")
+    
     if company:
-        sanitized_company = company.replace("'", "''").upper()
-        query_parts.append(f"nazva_kompanii LIKE '%{sanitized_company}%'")
+        with st.spinner("Перекладаємо назву компанії для пошуку..."):
+            translated_company = translate_for_query(company)
+        sanitized_company = translated_company.replace("'", "''").upper()
+        query_parts.append(f"UPPER(nazva_kompanii) LIKE '%{sanitized_company}%'")
+    
     if country:
         sanitized_country = country.replace("'", "''")
         query_parts.append(f"kraina_partner = '{sanitized_country}'")
+    
     if transport:
         sanitized_transport = transport.replace("'", "''")
         query_parts.append(f"vyd_transportu = '{sanitized_transport}'")
+
     if uktzed:
         query_parts.append(f"kod_uktzed LIKE '{uktzed}%'")
+
+    if yedrpou:
+        query_parts.append(f"kod_yedrpou = '{yedrpou}'")
 
     if not query_parts:
         st.warning("Будь ласка, оберіть хоча б один фільтр.")
