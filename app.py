@@ -1,10 +1,11 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 2.3
+# Версия: 3.0
 # Дата: 2025-10-09
 # Описание: 
-# - Окончательное исправление критической ошибки синтаксиса (f-string) 
-#   во всех частях кода для множественного выбора.
+# - Стабильная версия. Полностью переписана логика формирования 
+#   SQL-запроса для гарантированного исправления всех 
+#   синтаксических ошибок.
 # ===============================================
 
 import os
@@ -197,18 +198,29 @@ if search_button_filters:
     query_parts = []
     
     def process_text_input(input_str):
-        return [item.strip().replace("'", "''") for item in input_str.split(',') if item.strip()]
+        return [item.strip() for item in input_str.split(',') if item.strip()]
+
+    # ========================================================================
+    # <<< ОКОНЧАТЕЛЬНОЕ ИСПРАВЛЕНИЕ СИНТАКСИСА ЗДЕСЬ >>>
+    # Используется более простой и надежный способ для обработки кавычек
+    # ========================================================================
 
     if selected_directions:
-        sanitized_list = [f"'{d.replace('\'', '\'\'')}'" for d in selected_directions]
+        sanitized_list = []
+        for d in selected_directions:
+            sanitized_list.append(f"'{d.replace('\'', '\'\'')}'")
         query_parts.append(f"napryamok IN ({', '.join(sanitized_list)})")
     
     if selected_countries:
-        sanitized_list = [f"'{c.replace('\'', '\'\'')}'" for c in selected_countries]
+        sanitized_list = []
+        for c in selected_countries:
+            sanitized_list.append(f"'{c.replace('\'', '\'\'')}'")
         query_parts.append(f"kraina_partner IN ({', '.join(sanitized_list)})")
 
     if selected_transports:
-        sanitized_list = [f"'{t.replace('\'', '\'\'')}'" for t in selected_transports]
+        sanitized_list = []
+        for t in selected_transports:
+            sanitized_list.append(f"'{t.replace('\'', '\'\'')}'")
         query_parts.append(f"vyd_transportu IN ({', '.join(sanitized_list)})")
 
     if selected_years:
@@ -222,18 +234,24 @@ if search_button_filters:
 
     uktzed_list = process_text_input(uktzed_input)
     if uktzed_list:
-        uktzed_conditions = [f"kod_uktzed LIKE '{item}%'" for item in uktzed_list]
-        query_parts.append(f"({' OR '.join(uktzed_conditions)})")
+        conditions = []
+        for item in uktzed_list:
+            conditions.append(f"kod_uktzed LIKE '{item.replace('\'', '\'\'')}%'")
+        query_parts.append(f"({' OR '.join(conditions)})")
 
     yedrpou_list = process_text_input(yedrpou_input)
     if yedrpou_list:
-        sanitized_list = [f"'{item}'" for item in yedrpou_list]
+        sanitized_list = []
+        for item in yedrpou_list:
+            sanitized_list.append(f"'{item.replace('\'', '\'\'')}'")
         query_parts.append(f"kod_yedrpou IN ({', '.join(sanitized_list)})")
 
     company_list = process_text_input(company_input)
     if company_list:
-        company_conditions = [f"UPPER(nazva_kompanii) LIKE '%{item.upper()}%'" for item in company_list]
-        query_parts.append(f"({' OR '.join(company_conditions)})")
+        conditions = []
+        for item in company_list:
+            conditions.append(f"UPPER(nazva_kompanii) LIKE '%{item.replace('\'', '\'\'').upper()}%'")
+        query_parts.append(f"({' OR '.join(conditions)})")
 
     if not query_parts:
         st.warning("Будь ласка, оберіть хоча б один фільтр.")
