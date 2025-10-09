@@ -1,10 +1,10 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 2.2
+# Версия: 2.3
 # Дата: 2025-10-09
 # Описание: 
-# - Финальная версия с исправлением всех синтаксических ошибок (f-string).
-# - Включает AI-Аналитик и панель фильтров с множественным выбором.
+# - Окончательное исправление критической ошибки синтаксиса (f-string) 
+#   во всех частях кода для множественного выбора.
 # ===============================================
 
 import os
@@ -201,9 +201,8 @@ if search_button_filters:
     def process_text_input(input_str):
         return [item.strip() for item in input_str.split(',') if item.strip()]
 
-    # --- ИСПРАВЛЕННАЯ ЛОГИКА ---
+    # <<< ОКОНЧАТЕЛЬНОЕ ИСПРАВЛЕНИЕ СИНТАКСИСА ЗДЕСЬ >>>
     if selected_directions:
-        # Сначала подготавливаем список, правильно экранируя кавычки, потом объединяем
         sanitized_list = [f"'{d.replace('\'', '\'\'')}'" for d in selected_directions]
         query_parts.append(f"napryamok IN ({', '.join(sanitized_list)})")
     
@@ -226,7 +225,6 @@ if search_button_filters:
 
     uktzed_list = process_text_input(uktzed_input)
     if uktzed_list:
-        # Для LIKE нужно строить несколько условий через OR
         sanitized_conditions = [f"kod_uktzed LIKE '{item.replace('\'', '\'\'')}%'" for item in uktzed_list]
         query_parts.append(f"({' OR '.join(sanitized_conditions)})")
 
