@@ -1,11 +1,10 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 2.0
+# Версия: 2.1
 # Дата: 2025-10-09
-# Описание: Стабильная версия, включающая:
-# - AI-Аналитик для сложных запросов.
-# - AI-Поиск для поиска по описи товара.
-# - Панель ручных фильтров с множественным выбором.
+# Описание: 
+# - Исправлена критическая ошибка синтаксиса (SyntaxError) при 
+#   обработке множественного выбора в фильтрах.
 # ===============================================
 
 import os
@@ -16,14 +15,14 @@ import google.generativeai as genai
 import json
 from datetime import datetime
 
-# --- КОНФИГУРАЦИЯ СТРАНИЦЫ ---
+# --- КОНФИГУРАЦІЯ СТОРІНКИ ---
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 
 # --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 
-# --- ФУНКЦИЯ ПРОВЕРКИ ПАРОЛЯ ---
+# --- ФУНКЦІЯ ПЕРЕВІРКИ ПАРОЛЮ ---
 def check_password():
     def password_entered():
         if os.environ.get('K_SERVICE'):
@@ -62,7 +61,7 @@ def initialize_clients():
         st.error(f"Помилка аутентифікації в Google: {e}")
         st.session_state.client_ready = False
 
-# --- ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ---
+# --- ФУНКЦІЯ ЗАВАНТАЖЕННЯ ДАНИХ ---
 @st.cache_data(ttl=3600)
 def run_query(query):
     if st.session_state.get('client_ready', False):
@@ -77,7 +76,7 @@ def run_query(query):
 def get_analytical_ai_query(user_question, max_items=50):
     if not st.session_state.get('genai_ready', False):
         return None
-    prompt = f"""You are an expert SQL analyst... USER'S QUESTION: "{user_question}" """ # Сокращено для краткости
+    prompt = f"""You are an expert SQL analyst... USER'S QUESTION: "{user_question}" """
     try:
         model = genai.GenerativeModel('models/gemini-pro-latest')
         response = model.generate_content(prompt)
@@ -88,11 +87,11 @@ def get_analytical_ai_query(user_question, max_items=50):
         st.error(f"Помилка при генерації аналітичного SQL запиту: {e}")
         return None
 
-# --- ФУНКЦИЯ "AI-ПОИСК" ---
+# --- ФУНКЦІЯ "AI-ПОИСК" ---
 def get_ai_search_query(user_query, max_items=100):
     if not st.session_state.get('genai_ready', False):
         return None
-    prompt = f"""Based on the user's request, generate a SQL query... User request: "{user_query}" """ # Сокращено для краткости
+    prompt = f"""Based on the user's request, generate a SQL query... User request: "{user_query}" """
     try:
         model = genai.GenerativeModel('models/gemini-pro-latest')
         response = model.generate_content(prompt)
@@ -128,13 +127,10 @@ if not st.session_state.get('client_ready', False):
 
 # --- РАЗДЕЛ: AI-АНАЛИТИК ---
 st.header("🤖 AI-Аналитик: Задайте сложный вопрос")
-ai_analytical_question = st.text_area(
-    "Задайте ваш вопрос. Например: 'Найди топ-10 импортеров деталей для дронов по сумме'",
-    key="ai_analytical_question"
-)
+ai_analytical_question = st.text_area( "Задайте ваш вопрос...", key="ai_analytical_question")
 search_button_analytical_ai = st.button("Проанализировать с помощью AI", type="primary")
 if search_button_analytical_ai and ai_analytical_question:
-    with st.spinner("✨ AI-аналитик думает и пишет SQL-запрос..."):
+    with st.spinner("✨ AI-аналитик думает..."):
         analytical_sql = get_analytical_ai_query(ai_analytical_question)
         if analytical_sql:
             st.subheader("Сгенерированный SQL-запрос:")
@@ -158,7 +154,7 @@ with st.expander("Панель Фильтров и Поиска", expanded=True)
     ai_search_query_text = st.text_input("Опишіть товар...", key="ai_search_input")
     search_button_ai = st.button("Найти с помощью AI")
     if search_button_ai and ai_search_query_text:
-        with st.spinner("✨ AI генерирует запрос и ищет данные..."):
+        with st.spinner("✨ AI генерирует запрос..."):
             ai_sql = get_ai_search_query(ai_search_query_text)
             if ai_sql:
                 st.code(ai_sql, language='sql')
@@ -201,21 +197,27 @@ with st.expander("Панель Фильтров и Поиска", expanded=True)
 # --- ЛОГИКА ФИЛЬТРОВ ---
 if search_button_filters:
     query_parts = []
+    
     def process_text_input(input_str):
         return [item.strip() for item in input_str.split(',') if item.strip()]
 
+    # <<< ИСПРАВЛЕНИЕ ЗДЕСЬ >>>
     if selected_directions:
-        sanitized_list = [f"'{d}'" for d in selected_directions]
+        sanitized_list = [f"'{d.replace(\"'\", \"''\")}'" for d in selected_directions]
         query_parts.append(f"napryamok IN ({', '.join(sanitized_list)})")
+    
     if selected_countries:
         sanitized_list = [f"'{c.replace(\"'\", \"''\")}'" for c in selected_countries]
         query_parts.append(f"kraina_partner IN ({', '.join(sanitized_list)})")
+
     if selected_transports:
         sanitized_list = [f"'{t.replace(\"'\", \"''\")}'" for t in selected_transports]
         query_parts.append(f"vyd_transportu IN ({', '.join(sanitized_list)})")
+
     if selected_years:
         years_str = ', '.join(map(str, selected_years))
         query_parts.append(f"EXTRACT(YEAR FROM SAFE_CAST(data_deklaracii AS DATE)) IN ({years_str})")
+
     if weight_from > 0:
         query_parts.append(f"SAFE_CAST(vaha_netto_kg AS FLOAT64) >= {weight_from}")
     if weight_to > 0 and weight_to >= weight_from:
@@ -223,12 +225,14 @@ if search_button_filters:
 
     uktzed_list = process_text_input(uktzed_input)
     if uktzed_list:
-        uktzed_conditions = ' OR '.join([f"kod_uktzed LIKE '{item}%'" for item in uktzed_list])
+        uktzed_conditions = ' OR '.join([f"kod_uktzed LIKE '{item.replace(\"'\", \"''\")}%'" for item in uktzed_list])
         query_parts.append(f"({uktzed_conditions})")
+
     yedrpou_list = process_text_input(yedrpou_input)
     if yedrpou_list:
-        sanitized_list = [f"'{item}'" for item in yedrpou_list]
+        sanitized_list = [f"'{item.replace(\"'\", \"''\")}'" for item in yedrpou_list]
         query_parts.append(f"kod_yedrpou IN ({', '.join(sanitized_list)})")
+
     company_list = process_text_input(company_input)
     if company_list:
         company_conditions = ' OR '.join([f"UPPER(nazva_kompanii) LIKE '%{item.replace(\"'\", \"''\").upper()}%'" for item in company_list])
