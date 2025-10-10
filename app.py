@@ -1,11 +1,11 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 7.3
+# Версия: 7.4
 # Дата: 2025-10-10
 # Описание: 
-# - Добавлены настройки безопасности (safety_settings) в вызов AI-модели.
-#   Это решает проблему с пустым ответом от AI на запросы со 
-#   словами типа "дрон", исправляя ошибку JSON "Expecting value".
+# - Расширены настройки безопасности (safety_settings) в вызове AI-модели
+#   для отключения всех категорий фильтров. Это должно решить проблему 
+#   с блокировкой запросов на более широкий круг тем (металл и т.д.).
 # ===============================================
 
 import os
@@ -14,7 +14,6 @@ from google.cloud import bigquery
 from google.cloud.bigquery import QueryJobConfig, ArrayQueryParameter, ScalarQueryParameter
 import pandas as pd
 import google.generativeai as genai
-# НОВЫЙ ИМПОРТ для настроек безопасности
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import json
 from datetime import datetime
@@ -85,25 +84,29 @@ def get_analytical_ai_query(user_question, max_items=50):
     try:
         model = genai.GenerativeModel('models/gemini-pro-latest')
         
-        # ИЗМЕНЕНИЕ: Добавляем настройки, чтобы отключить блокировку
+        # ИЗМЕНЕНИЕ: Отключаем все 4 категории фильтров
         safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }
 
         response = model.generate_content(prompt, safety_settings=safety_settings)
         
-        # Для отладки посмотрим, что возвращает модель
-        print(f"Raw AI response: {response.text}")
-
         response_text = response.text.strip().replace("```json", "").replace("```", "")
         if not response_text:
-            st.error("AI-модель вернула пустой ответ. Возможно, запрос был заблокирован несмотря на настройки безопасности.")
+            st.error("AI-модель вернула пустой ответ. Запрос был заблокирован.")
             return None
 
         response_json = json.loads(response_text)
         return response_json.get("sql_query")
     except Exception as e:
-        st.error(f"Помилка при генерації аналітичного SQL запиту: {e}")
+        # Улучшаем сообщение об ошибке, чтобы показать ответ модели, если он есть
+        raw_response = "Ответ от AI был пустым."
+        if 'response' in locals() and hasattr(response, 'text'):
+            raw_response = response.text
+        st.error(f"Помилка при обработке ответа AI: {e}. Ответ модели: '{raw_response}'")
         return None
 
 # --- ЗАГРУЗКА СПИСКОВ ДЛЯ ФИЛЬТРОВ ---
