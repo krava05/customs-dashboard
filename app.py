@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 15.3
+# Версия: 15.4
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 15.3"
+APP_VERSION = "Версия 15.4"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -132,7 +132,6 @@ def find_and_validate_codes(product_description):
         
     where_clause = " OR ".join(query_parts)
     
-    # --- ИЗМЕНЕНИЕ ЗДЕСЬ: Замена кавычек в ALIAS ---
     validation_query = f"""
     WITH RankedDescriptions AS (
       SELECT
@@ -159,7 +158,6 @@ def find_and_validate_codes(product_description):
     ORDER BY tc.total_declarations DESC
     LIMIT 50
     """
-    # ---------------------------------------------------
     
     job_config = QueryJobConfig(query_parameters=query_params)
     validated_df = run_query(validation_query, job_config=job_config)
@@ -338,7 +336,9 @@ if search_button_filters:
         st.warning("Будь ласка, оберіть хоча б один фільтр.")
     else:
         where_clause = " AND ".join(query_parts)
-        final_query = f"SELECT * FROM `{TABLE_ID}` WHERE {where_clause} LIMIT 1000"
+        # --- ИЗМЕНЕНИЕ ЗДЕСЬ: Лимит увеличен до 5000 ---
+        final_query = f"SELECT * FROM `{TABLE_ID}` WHERE {where_clause} LIMIT 5000"
+        # ---------------------------------------------
         job_config = QueryJobConfig(query_parameters=query_params)
         with st.spinner("Виконується запит..."):
             results_df = run_query(final_query, job_config=job_config)
