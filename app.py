@@ -1,11 +1,10 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 7.5
+# Версия: 7.6
 # Дата: 2025-10-10
 # Описание: 
-# - Усилен и ужесточен промпт для AI-Аналитика, чтобы он возвращал 
-#   только JSON и не добавлял лишнего текста. Это исправляет 
-#   ошибку парсинга JSON ("Expecting value").
+# - Добавлен недостающий импорт 're', что исправляет ошибку 
+#   're is not defined' при обработке ответа AI.
 # ===============================================
 
 import os
@@ -17,6 +16,7 @@ import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import json
 from datetime import datetime
+import re # <<< ВОТ ЭТО ИСПРАВЛЕНИЕ
 
 # --- КОНФИГУРАЦИЯ СТРАНИЦЫ ---
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
@@ -27,7 +27,6 @@ TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 
 # --- ФУНКЦИЯ ПРОВЕРКИ ПАРОЛЯ ---
 def check_password():
-    # ... (код без изменений) ...
     def password_entered():
         if os.environ.get('K_SERVICE'): correct_password = os.environ.get("APP_PASSWORD")
         else: correct_password = st.secrets.get("APP_PASSWORD")
@@ -41,7 +40,6 @@ def check_password():
 
 # --- ИНИЦИАЛИЗАЦИЯ КЛИЕНТОВ GOOGLE ---
 def initialize_clients():
-    # ... (код без изменений) ...
     if 'clients_initialized' in st.session_state: return
     try:
         if os.environ.get('K_SERVICE'):
@@ -62,7 +60,6 @@ def initialize_clients():
 # --- ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ---
 @st.cache_data(ttl=3600)
 def run_query(query, job_config=None):
-    # ... (код без изменений) ...
     if st.session_state.get('client_ready', False):
         try:
             return st.session_state.bq_client.query(query, job_config=job_config).to_dataframe()
@@ -77,7 +74,6 @@ def get_analytical_ai_query(user_question, max_items=50):
         st.warning("AI-сервис не готов.")
         return None
     
-    # ИЗМЕНЕНИЕ ЗДЕСЬ: Промпт стал намного строже
     prompt = f"""
     You are a SQL generation machine. Your ONLY task is to convert a user's question into a Google BigQuery SQL query and return it in a JSON format.
 
@@ -112,7 +108,6 @@ def get_analytical_ai_query(user_question, max_items=50):
         response = model.generate_content(prompt, safety_settings=safety_settings)
         
         response_text = response.text.strip()
-        # Пытаемся найти JSON в тексте, даже если модель добавила обертку ```json
         match = re.search(r'\{.*\}', response_text, re.DOTALL)
         if not match:
             st.error(f"AI-модель вернула ответ без JSON. Ответ модели: '{response_text}'")
