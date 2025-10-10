@@ -1,11 +1,11 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 7.4
+# Версия: 7.5
 # Дата: 2025-10-10
 # Описание: 
-# - Расширены настройки безопасности (safety_settings) в вызове AI-модели
-#   для отключения всех категорий фильтров. Это должно решить проблему 
-#   с блокировкой запросов на более широкий круг тем (металл и т.д.).
+# - Усилен и ужесточен промпт для AI-Аналитика, чтобы он возвращал 
+#   только JSON и не добавлял лишнего текста. Это исправляет 
+#   ошибку парсинга JSON ("Expecting value").
 # ===============================================
 
 import os
@@ -77,33 +77,52 @@ def get_analytical_ai_query(user_question, max_items=50):
         st.warning("AI-сервис не готов.")
         return None
     
+    # ИЗМЕНЕНИЕ ЗДЕСЬ: Промпт стал намного строже
     prompt = f"""
-    You are an expert SQL analyst... 
+    You are a SQL generation machine. Your ONLY task is to convert a user's question into a Google BigQuery SQL query and return it in a JSON format.
+
+    DATABASE SCHEMA:
+    - Table: `{TABLE_ID}`
+    - Columns are all STRING type: data_deklaracii, napryamok, nazva_kompanii, kod_yedrpou, kraina_partner, kod_uktzed, opis_tovaru, mytna_vartist_hrn, vaha_netto_kg, vyd_transportu.
+    - Data language is Ukrainian.
+
+    CRITICAL INSTRUCTIONS:
+    1.  **OUTPUT FORMAT**: Your entire response MUST be a single, valid JSON object with one key: "sql_query". Do NOT add any introductory text, explanations, or markdown.
+    2.  **CASTING**: When using SUM() on `mytna_vartist_hrn` or `vaha_netto_kg`, you MUST cast them using `SAFE_CAST(column AS FLOAT64)`.
+    3.  **AGGREGATION**: If the user asks for a list of companies/importers/exporters, you MUST `GROUP BY nazva_kompanii, kod_yedrpou` and calculate aggregates like `COUNT(*) as declaration_count` and `SUM(SAFE_CAST(...))`.
+    4.  **SEMANTIC SEARCH**: For searching goods in `opis_tovaru` (e.g., "drone parts"), use a broad `REGEXP_CONTAINS` pattern with `(?i)` flag. For "drone parts," search for 'дрон|квадрокоптер|бпла|безпілотник|пропелер'.
+    5.  **SORTING**: `ORDER BY` the most relevant aggregate metric in `DESC` order.
+    6.  **LIMIT**: `LIMIT` the results to {max_items}.
+
+    VALID JSON RESPONSE EXAMPLE:
+    {{
+      "sql_query": "SELECT nazva_kompanii, COUNT(*) as declaration_count FROM `{TABLE_ID}` WHERE REGEXP_CONTAINS(opis_tovaru, '(?i)дрон') GROUP BY 1 ORDER BY 2 DESC LIMIT 10"
+    }}
+
     USER'S QUESTION: "{user_question}"
     """
     try:
         model = genai.GenerativeModel('models/gemini-pro-latest')
-        
-        # ИЗМЕНЕНИЕ: Отключаем все 4 категории фильтров
         safety_settings = {
             HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }
-
         response = model.generate_content(prompt, safety_settings=safety_settings)
         
-        response_text = response.text.strip().replace("```json", "").replace("```", "")
-        if not response_text:
-            st.error("AI-модель вернула пустой ответ. Запрос был заблокирован.")
+        response_text = response.text.strip()
+        # Пытаемся найти JSON в тексте, даже если модель добавила обертку ```json
+        match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if not match:
+            st.error(f"AI-модель вернула ответ без JSON. Ответ модели: '{response_text}'")
             return None
-
-        response_json = json.loads(response_text)
+        
+        json_text = match.group(0)
+        response_json = json.loads(json_text)
         return response_json.get("sql_query")
     except Exception as e:
-        # Улучшаем сообщение об ошибке, чтобы показать ответ модели, если он есть
-        raw_response = "Ответ от AI был пустым."
+        raw_response = "Ответ от AI был пустым или некорректным."
         if 'response' in locals() and hasattr(response, 'text'):
             raw_response = response.text
         st.error(f"Помилка при обработке ответа AI: {e}. Ответ модели: '{raw_response}'")
