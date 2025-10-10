@@ -1,11 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 14.2
-# Дата: 2025-10-10
-# Описание: 
-# - Исправлена ошибка синтаксиса (Unterminated string), вызванная
-#   неполным кодом в предыдущих версиях. Восстановлены все
-#   промпты для AI.
+# Версия: 15.0
 # ===============================================
 
 import os
@@ -16,35 +11,42 @@ import pandas as pd
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import json
-from datetime import datetime
 import re
 
-# --- ВЕРСИЯ ПРИЛОЖЕНИЯ ---
-APP_VERSION = "Версия 14.2"
-
-# --- КОНФИГУРАЦИЯ СТРАНИЦЫ ---
+# --- КОНФИГУРАЦИЯ ---
+APP_VERSION = "Версия 15.0"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
-
-# --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 
-# --- ФУНКЦИЯ ПРОВЕРКИ ПАРОЛЯ ---
+# --- ФУНКЦИИ ---
+
 def check_password():
+    """Проверяет пароль доступа к приложению."""
     def password_entered():
-        if os.environ.get('K_SERVICE'): correct_password = os.environ.get("APP_PASSWORD")
-        else: correct_password = st.secrets.get("APP_PASSWORD")
+        if os.environ.get('K_SERVICE'):
+            correct_password = os.environ.get("APP_PASSWORD")
+        else:
+            correct_password = st.secrets.get("APP_PASSWORD")
+        
         if st.session_state.get("password") and st.session_state["password"] == correct_password:
-            st.session_state["password_correct"] = True; del st.session_state["password"]
-        else: st.session_state["password_correct"] = False
-    if st.session_state.get("password_correct", False): return True
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]
+        else:
+            st.session_state["password_correct"] = False
+
+    if st.session_state.get("password_correct", False):
+        return True
+    
     st.text_input("Введіть пароль для доступу", type="password", on_change=password_entered, key="password")
-    if "password_correct" in st.session_state and not st.session_state["password_correct"]: st.error("😕 Пароль невірний.")
+    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+        st.error("😕 Пароль невірний.")
     return False
 
-# --- ИНИЦИАЛИЗАЦИЯ КЛИЕНТОВ GOOGLE ---
 def initialize_clients():
-    if 'clients_initialized' in st.session_state: return
+    """Инициализирует клиенты для BigQuery и Generative AI."""
+    if 'clients_initialized' in st.session_state:
+        return
     try:
         if os.environ.get('K_SERVICE'):
             st.session_state.bq_client = bigquery.Client(project=PROJECT_ID)
@@ -52,17 +54,19 @@ def initialize_clients():
         else:
             st.session_state.bq_client = bigquery.Client()
             api_key = st.secrets.get("GOOGLE_AI_API_KEY")
+        
         if api_key:
             genai.configure(api_key=api_key)
             st.session_state.genai_ready = True
+            
         st.session_state.clients_initialized = True
         st.session_state.client_ready = True
     except Exception as e:
         st.error(f"Помилка аутентифікації в Google: {e}")
         st.session_state.client_ready = False
 
-# --- ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ---
 def run_query(query, job_config=None):
+    """Выполняет запрос к BigQuery и возвращает DataFrame."""
     if st.session_state.get('client_ready', False):
         try:
             return st.session_state.bq_client.query(query, job_config=job_config).to_dataframe()
@@ -71,45 +75,113 @@ def run_query(query, job_config=None):
             return pd.DataFrame()
     return pd.DataFrame()
 
-# --- ФУНКЦИЯ "AI-ПОМОЩНИК ПО КОДАМ" ---
 def get_ai_code_suggestions(product_description):
-    if not st.session_state.get('genai_ready', False): return None
+    """Получает от AI список теоретических кодов УКТЗЕД."""
+    if not st.session_state.get('genai_ready', False):
+        return None
+    
     prompt = f"""
-    You are an expert in customs classification and Ukrainian HS codes (УКТЗЕД).
-    Analyze the user's product description. Your goal is to suggest a list of the most relevant 4 to 10-digit HS codes.
-    CRITICAL INSTRUCTIONS:
-    1.  Your entire response MUST be a single, valid JSON object with one key: "suggestions".
-    2.  The value of "suggestions" must be an array of JSON objects.
-    3.  Each object must have two keys: "code" (the HS code as a string) and "description" (a brief explanation in Ukrainian).
-    4.  Do not add any explanations or introductory text.
-    VALID JSON RESPONSE EXAMPLE:
-    {{
-      "suggestions": [
-        {{"code": "88073000", "description": "Частини до безпілотних літальних апаратів"}},
-        {{"code": "85076000", "description": "Акумулятори літій-іонні"}}
-      ]
-    }}
-    USER'S PRODUCT DESCRIPTION: "{product_description}"
+    Ти експерт з митної класифікації та українських кодів УКТЗЕД.
+    Проаналізуй опис товару та надай список потенційних кодів УКТЗЕД.
+    Включи коди різної довжини (наприклад, 4, 6, 10 знаків).
+
+    Твоя відповідь МАЄ БУТИ ТІЛЬКИ у форматі JSON, що є єдиним списком рядків.
+    Приклад правильної відповіді: ["8517", "851712", "8517120000"]
+    Не додавай жодних описів, пояснень чи іншого тексту поза межами JSON-масиву.
+
+    ОПИС ТОВАРУ: "{product_description}"
     """
     try:
-        model = genai.GenerativeModel('models/gemini-pro-latest')
-        safety_settings = { HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE }
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
         generation_config = genai.types.GenerationConfig(response_mime_type="application/json")
-        response = model.generate_content(prompt, generation_config=generation_config, safety_settings=safety_settings)
-        response_json = json.loads(response.text)
-        if isinstance(response_json, dict):
-            return response_json.get("suggestions", [])
-        elif isinstance(response_json, list):
+        response = model.generate_content(prompt, generation_config=generation_config)
+        
+        cleaned_text = response.text.strip().replace("```json", "").replace("```", "").strip()
+        response_json = json.loads(cleaned_text)
+
+        if isinstance(response_json, list) and all(isinstance(i, str) for i in response_json):
             return response_json
         else:
+            st.error("AI повернув дані у неочікуваному форматі.")
             return []
+            
     except Exception as e:
-        st.error(f"Помилка при получении кодов от AI: {e}")
+        st.error(f"Помилка при отриманні кодів від AI: {e}")
         return None
 
-# --- ЗАГРУЗКА СПИСКОВ ДЛЯ ФИЛЬТРОВ ---
+def find_and_validate_codes(product_description):
+    """Получает коды от AI и проверяет их наличие в базе данных BigQuery."""
+    
+    # 1. Получить теоретические коды от AI
+    theoretical_codes = get_ai_code_suggestions(product_description)
+    
+    if theoretical_codes is None or not theoretical_codes:
+        st.warning("AI не зміг запропонувати коди. Спробуйте змінити опис товару.")
+        return None, [], []
+
+    unique_codes = list(set(filter(None, theoretical_codes)))
+    if not unique_codes:
+        st.warning("Відповідь AI не містить кодів для перевірки.")
+        return None, [], []
+
+    # 2. Построить и выполнить запрос для проверки кодов в BigQuery
+    query_parts = []
+    query_params = []
+    for i, code in enumerate(unique_codes):
+        param_name = f"code{i}"
+        query_parts.append(f"STARTS_WITH(kod_uktzed, @{param_name})")
+        query_params.append(ScalarQueryParameter(param_name, "STRING", code))
+        
+    where_clause = " OR ".join(query_parts)
+    
+    validation_query = f"""
+    WITH RankedDescriptions AS (
+      SELECT
+        kod_uktzed,
+        opis_tovaru,
+        COUNT(*) AS cnt,
+        ROW_NUMBER() OVER(PARTITION BY kod_uktzed ORDER BY COUNT(*) DESC) as rn
+      FROM `{TABLE_ID}`
+      WHERE ({where_clause}) AND kod_uktzed IS NOT NULL
+      GROUP BY kod_uktzed, opis_tovaru
+    ),
+    TotalCounts AS (
+      SELECT kod_uktzed, SUM(cnt) as total_declarations
+      FROM RankedDescriptions
+      GROUP BY kod_uktzed
+    )
+    SELECT
+      rd.kod_uktzed AS "Код УКТЗЕД в базі",
+      rd.opis_tovaru AS "Найчастіший опис в базі",
+      tc.total_declarations AS "Кількість декларацій"
+    FROM RankedDescriptions rd
+    JOIN TotalCounts tc ON rd.kod_uktzed = tc.kod_uktzed
+    WHERE rd.rn = 1
+    ORDER BY tc.total_declarations DESC
+    LIMIT 50
+    """
+    
+    job_config = QueryJobConfig(query_parameters=query_params)
+    validated_df = run_query(validation_query, job_config=job_config)
+    
+    # 3. Определить, какие из предложенных AI кодов дали результат
+    found_prefixes = set()
+    if not validated_df.empty:
+        # Получаем столбец с кодами, которые нашлись в базе
+        db_codes_series = validated_df["Код УКТЗЕД в базі"]
+        for db_code in db_codes_series:
+            for ai_code in unique_codes:
+                if str(db_code).startswith(ai_code):
+                    found_prefixes.add(ai_code)
+    
+    unfound_codes = set(unique_codes) - found_prefixes
+    
+    return validated_df, list(found_prefixes), list(unfound_codes)
+
+
 @st.cache_data(ttl=3600)
 def get_filter_options():
+    # ... (эта функция без изменений)
     options = {}
     options['direction'] = ['Імпорт', 'Експорт']
     query_countries = f"SELECT DISTINCT kraina_partner FROM `{TABLE_ID}` WHERE kraina_partner IS NOT NULL ORDER BY kraina_partner"
@@ -120,8 +192,8 @@ def get_filter_options():
     options['years'] = list(run_query(query_years)['year'].dropna().astype(int))
     return options
 
-# --- ЛОГИКА СБРОСА ФИЛЬТРОВ ---
 def reset_all_filters():
+    # ... (эта функция без изменений)
     st.session_state.selected_directions = []
     st.session_state.selected_countries = []
     st.session_state.selected_transports = []
@@ -133,61 +205,65 @@ def reset_all_filters():
     st.session_state.company_input = ""
 
 # --- ОСНОВНОЙ ИНТЕРФЕЙС ПРИЛОЖЕНИЯ ---
+
 if not check_password():
     st.stop()
 
-st.markdown(
-    f"""
-    <style>
-    .version-info {{
-        position: fixed;
-        top: 55px;
-        right: 15px;
-        font-size: 0.8em;
-        color: gray;
-        z-index: 100;
-    }}
-    </style>
-    <div class="version-info">{APP_VERSION}</div>
-    """,
-    unsafe_allow_html=True
-)
-
+st.sidebar.info(APP_VERSION)
 st.title("Аналітика Митних Даних 📈")
+
 initialize_clients()
 if not st.session_state.get('client_ready', False):
-    st.error("❌ Не вдалося підключитися до Google BigQuery."); st.stop()
+    st.error("❌ Не вдалося підключитися до Google BigQuery.")
+    st.stop()
 
-filter_options = get_filter_options()
-if 'selected_directions' not in st.session_state:
-    reset_all_filters()
+# --- БЛОК AI-ПОМОЩНИКА ---
+st.header("🤖 AI-помічник по кодам УКТЗЕД")
+ai_code_description = st.text_input("Введіть опис товару для пошуку реальних кодів у вашій базі:", key="ai_code_helper_input")
 
-# --- РАЗДЕЛ: AI-ПОМОЩНИК ПО КОДАМ ---
-st.header("🤖 AI-помощник по кодам УКТЗЕД")
-ai_code_description = st.text_input("Введите описание товара...", key="ai_code_helper_input")
-if st.button("Предложить коды"):
+if st.button("💡 Запропонувати та перевірити коди", type="primary"):
     if ai_code_description:
-        with st.spinner("AI подбирает коды..."):
-            st.session_state.suggested_codes = get_ai_code_suggestions(ai_code_description)
+        with st.spinner("AI підбирає коди, а ми перевіряємо їх у базі..."):
+            validated_df, found, unfound = find_and_validate_codes(ai_code_description)
+            st.session_state.validated_codes_df = validated_df
+            st.session_state.found_ai_codes = found
+            st.session_state.unfound_ai_codes = unfound
     else:
-        st.warning("Введите описание товара.")
+        st.warning("Будь ласка, введіть опис товару.")
 
-if 'suggested_codes' in st.session_state and st.session_state.suggested_codes:
-    st.success("Рекомендуемые коды:")
-    df_suggestions = pd.DataFrame(st.session_state.suggested_codes)
-    st.dataframe(df_suggestions, use_container_width=True)
-    if st.button("Очистить результат", type="secondary"):
-        st.session_state.suggested_codes = None
+if 'validated_codes_df' in st.session_state:
+    validated_df = st.session_state.validated_codes_df
+    
+    if validated_df is not None and not validated_df.empty:
+        st.success(f"✅ Знайдено {len(validated_df)} релевантних кодів у вашій базі даних:")
+        st.dataframe(validated_df, use_container_width=True)
+        if st.session_state.found_ai_codes:
+            st.info(f"Коди знайдено за цими пропозиціями AI: `{', '.join(st.session_state.found_ai_codes)}`")
+    else:
+        st.warning("🚫 У вашій базі даних не знайдено жодного коду, що відповідає пропозиціям AI.")
+
+    if st.session_state.unfound_ai_codes:
+        st.caption(f"Теоретичні коди від AI, для яких не знайдено збігів: `{', '.join(st.session_state.unfound_ai_codes)}`")
+
+    if st.button("Очистити результат AI", type="secondary"):
+        keys_to_delete = ['validated_codes_df', 'found_ai_codes', 'unfound_ai_codes']
+        for key in keys_to_delete:
+            if key in st.session_state:
+                del st.session_state[key]
         st.rerun()
 
 st.divider()
 
-# --- СЕКЦИЯ РУЧНЫХ ФИЛЬТРОВ ---
-st.header("📊 Ручные фильтры")
-with st.expander("Панель Фильтров", expanded=True):
-    st.button("Сбросить все фильтры", on_click=reset_all_filters, use_container_width=True, type="secondary")
+# --- БЛОК РУЧНЫХ ФИЛЬТРОВ ---
+filter_options = get_filter_options()
+if 'selected_directions' not in st.session_state:
+    reset_all_filters()
+
+st.header("📊 Ручні фільтри")
+with st.expander("Панель Фільтрів", expanded=True):
+    # ... (этот раздел без изменений)
+    st.button("Скинути всі фільтри", on_click=reset_all_filters, use_container_width=True, type="secondary")
     st.markdown("---")
-    
     col1, col2, col3 = st.columns(3)
     with col1: st.multiselect("Напрямок:", options=filter_options['direction'], key='selected_directions')
     with col2: st.multiselect("Країна-партнер:", options=filter_options['countries'], key='selected_countries')
@@ -203,14 +279,12 @@ with st.expander("Панель Фильтров", expanded=True):
     with col6: st.text_input("Код УКТЗЕД (через кому):", key='uktzed_input')
     with col7: st.text_input("Код ЄДРПОУ (через кому):", key='yedrpou_input')
     with col8: st.text_input("Назва компанії (через кому):", key='company_input')
-    
-    search_button_filters = st.button("🔍 Знайти за фильтрами", use_container_width=True, type="primary")
+    search_button_filters = st.button("🔍 Знайти за фільтрами", use_container_width=True, type="primary")
 
-# --- ЛОГИКА ФИЛЬТРОВ ---
 if search_button_filters:
+    # ... (этот раздел без изменений)
     query_parts = []; query_params = []
     def process_text_input(input_str): return [item.strip() for item in input_str.split(',') if item.strip()]
-
     if st.session_state.selected_directions:
         query_parts.append("napryamok IN UNNEST(@directions)")
         query_params.append(ArrayQueryParameter("directions", "STRING", st.session_state.selected_directions))
@@ -223,14 +297,12 @@ if search_button_filters:
     if st.session_state.selected_years:
         query_parts.append("EXTRACT(YEAR FROM SAFE_CAST(data_deklaracii AS DATE)) IN UNNEST(@years)")
         query_params.append(ArrayQueryParameter("years", "INT64", st.session_state.selected_years))
-
     if st.session_state.weight_from > 0:
         query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) >= @weight_from")
         query_params.append(ScalarQueryParameter("weight_from", "FLOAT64", st.session_state.weight_from))
     if st.session_state.weight_to > 0 and st.session_state.weight_to >= st.session_state.weight_from:
         query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) <= @weight_to")
         query_params.append(ScalarQueryParameter("weight_to", "FLOAT64", st.session_state.weight_to))
-
     uktzed_list = process_text_input(st.session_state.uktzed_input)
     if uktzed_list:
         conditions = []
@@ -239,12 +311,10 @@ if search_button_filters:
             conditions.append(f"kod_uktzed LIKE @{param_name}")
             query_params.append(ScalarQueryParameter(param_name, "STRING", f"{item}%"))
         query_parts.append(f"({' OR '.join(conditions)})")
-
     yedrpou_list = process_text_input(st.session_state.yedrpou_input)
     if yedrpou_list:
         query_parts.append("kod_yedrpou IN UNNEST(@yedrpou)")
         query_params.append(ArrayQueryParameter("yedrpou", "STRING", yedrpou_list))
-
     company_list = process_text_input(st.session_state.company_input)
     if company_list:
         conditions = []
@@ -260,7 +330,6 @@ if search_button_filters:
         where_clause = " AND ".join(query_parts)
         final_query = f"SELECT * FROM `{TABLE_ID}` WHERE {where_clause} LIMIT 1000"
         job_config = QueryJobConfig(query_parameters=query_params)
-        st.code(final_query, language='sql')
         with st.spinner("Виконується запит..."):
             results_df = run_query(final_query, job_config=job_config)
             st.success(f"Знайдено {len(results_df)} записів.")
