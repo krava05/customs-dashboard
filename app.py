@@ -1,11 +1,10 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 11.0
+# Версия: 11.1
 # Дата: 2025-10-10
 # Описание: 
-# - Восстановлена полная функциональность AI-Аналитика и ручных фильтров.
-# - Добавлены недостающие кнопки сброса для текстовых полей.
-# - Финальная стабильная версия.
+# - Добавлены расширенные настройки безопасности в "AI-помощник по кодам",
+#   чтобы предотвратить блокировку запросов со словом "дрон" и т.п.
 # ===============================================
 
 import os
@@ -20,7 +19,7 @@ from datetime import datetime
 import re
 
 # --- ВЕРСИЯ ПРИЛОЖЕНИЯ ---
-APP_VERSION = "Версия 11.0"
+APP_VERSION = "Версия 11.1"
 
 # --- КОНФИГУРАЦИЯ СТРАНИЦЫ ---
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
@@ -76,12 +75,15 @@ def get_analytical_ai_query(user_question, max_items=50):
     if not st.session_state.get('genai_ready', False):
         st.warning("AI-сервис не готов.")
         return None
-    prompt = f"""
-    You are a SQL generation machine... USER'S QUESTION: "{user_question}"
-    """
+    prompt = f"""You are an expert SQL analyst... USER'S QUESTION: "{user_question}" """
     try:
         model = genai.GenerativeModel('models/gemini-pro-latest')
-        safety_settings = { HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE }
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
         response = model.generate_content(prompt, safety_settings=safety_settings)
         response_text = response.text.strip()
         match = re.search(r'\{.*\}', response_text, re.DOTALL)
@@ -89,7 +91,7 @@ def get_analytical_ai_query(user_question, max_items=50):
         json_text = match.group(0)
         response_json = json.loads(json_text)
         return response_json.get("sql_query")
-    except Exception as e:
+    except Exception:
         return None
 
 # --- ФУНКЦИЯ "AI-ПОМОЩНИК ПО КОДАМ" ---
@@ -97,18 +99,29 @@ def get_ai_code_suggestions(product_description):
     if not st.session_state.get('genai_ready', False):
         st.warning("AI-сервис не готов.")
         return None
-    prompt = f"""You are an expert in customs classification... USER'S PRODUCT DESCRIPTION: "{product_description}" """
+    prompt = f"""
+    You are an expert in customs classification... USER'S PRODUCT DESCRIPTION: "{product_description}"
+    """
     try:
         model = genai.GenerativeModel('models/gemini-pro-latest')
-        safety_settings = { HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE }
+        # ИЗМЕНЕНИЕ: Добавлены полные настройки безопасности
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
         response = model.generate_content(prompt, safety_settings=safety_settings)
         response_text = response.text.strip()
         match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if not match: return None
+        if not match: 
+            st.error(f"AI-модель вернула ответ без JSON. Ответ: '{response_text}'")
+            return None
         json_text = match.group(0)
         response_json = json.loads(json_text)
         return response_json.get("suggestions", [])
-    except Exception:
+    except Exception as e:
+        st.error(f"Помилка при получении кодов от AI: {e}")
         return None
 
 # --- ЗАГРУЗКА СПИСКОВ ДЛЯ ФИЛЬТРОВ ---
@@ -150,7 +163,7 @@ filter_options = get_filter_options()
 if 'selected_directions' not in st.session_state:
     reset_all_filters()
 
-# --- РАЗДЕЛ: AI-АНАЛИТИК (ВОССТАНОВЛЕН) ---
+# --- РАЗДЕЛ: AI-АНАЛИТИК ---
 st.header("🤖 AI-Аналитик: Задайте сложный вопрос")
 ai_analytical_question = st.text_area("Задайте ваш вопрос...", key="ai_analytical_question")
 search_button_analytical_ai = st.button("Проанализировать с помощью AI", type="primary")
@@ -205,28 +218,18 @@ with st.expander("Панель Фильтров", expanded=True):
     with col4: st.multiselect("Роки:", options=filter_options['years'], key='selected_years')
     with col5:
         st.write("Вага нетто, кг")
-        c1, c2, c3 = st.columns([2,2,1], vertical_alignment="bottom")
-        c1.number_input("Від", min_value=0, step=100, key="weight_from", label_visibility="collapsed")
-        c2.number_input("До", min_value=0, step=100, key="weight_to", label_visibility="collapsed")
-        c3.button("❌", key="reset_weight", on_click=lambda: st.session_state.update(weight_from=0, weight_to=0))
+        weight_col1, weight_col2 = st.columns(2)
+        weight_from = weight_col1.number_input("Від", min_value=0, step=100, key="weight_from")
+        weight_to = weight_col2.number_input("До", min_value=0, step=100, key="weight_to")
 
     col6, col7, col8 = st.columns(3)
-    with col6:
-        c1, c2 = st.columns([4,1], vertical_alignment="bottom")
-        c1.text_input("Код УКТЗЕД (через кому):", key='uktzed_input', label_visibility="collapsed")
-        c2.button("❌", key="reset_uktzed", on_click=lambda: st.session_state.update(uktzed_input=""))
-    with col7:
-        c1, c2 = st.columns([4,1], vertical_alignment="bottom")
-        c1.text_input("Код ЄДРПОУ (через кому):", key='yedrpou_input', label_visibility="collapsed")
-        c2.button("❌", key="reset_yedrpou", on_click=lambda: st.session_state.update(yedrpou_input=""))
-    with col8:
-        c1, c2 = st.columns([4,1], vertical_alignment="bottom")
-        c1.text_input("Назва компанії (через кому):", key='company_input', label_visibility="collapsed")
-        c2.button("❌", key="reset_company", on_click=lambda: st.session_state.update(company_input=""))
+    with col6: st.text_input("Код УКТЗЕД (через кому):", key='uktzed_input')
+    with col7: st.text_input("Код ЄДРПОУ (через кому):", key='yedrpou_input')
+    with col8: st.text_input("Назва компанії (через кому):", key='company_input')
     
     search_button_filters = st.button("🔍 Знайти за фильтрами", use_container_width=True, type="primary")
 
-# --- ЛОГИКА ФИЛЬТРОВ (ВОССТАНОВЛЕНА) ---
+# --- ЛОГИКА ФИЛЬТРОВ ---
 if search_button_filters:
     query_parts = []; query_params = []
     def process_text_input(input_str): return [item.strip() for item in input_str.split(',') if item.strip()]
