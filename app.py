@@ -1,10 +1,10 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 13.1
+# Версия: 14.0
 # Дата: 2025-10-10
 # Описание: 
-# - Исправлена ошибка отступов (IndentationError) путем восстановления
-#   полного кода всех функций.
+# - Убран раздел "AI-Аналитик".
+# - Номер версии перемещен в правый верхний угол экрана.
 # ===============================================
 
 import os
@@ -19,7 +19,7 @@ from datetime import datetime
 import re
 
 # --- ВЕРСИЯ ПРИЛОЖЕНИЯ ---
-APP_VERSION = "Версия 13.1"
+APP_VERSION = "Версия 14.0"
 
 # --- КОНФИГУРАЦИЯ СТРАНИЦЫ ---
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
@@ -70,57 +70,11 @@ def run_query(query, job_config=None):
             return pd.DataFrame()
     return pd.DataFrame()
 
-# --- ФУНКЦИЯ "AI-АНАЛИТИК" ---
-def get_analytical_ai_query(user_question, max_items=50):
-    if not st.session_state.get('genai_ready', False): return None
-    prompt = f"""
-    You are a SQL generation machine. Your ONLY task is to convert a user's question into a Google BigQuery SQL query and return it in a JSON format.
-    DATABASE SCHEMA:
-    - Table: `{TABLE_ID}`
-    - Columns are all STRING type: data_deklaracii, napryamok, nazva_kompanii, kod_yedrpou, kraina_partner, kod_uktzed, opis_tovaru, mytna_vartist_hrn, vaha_netto_kg, vyd_transportu.
-    - Data language is Ukrainian.
-    CRITICAL INSTRUCTIONS:
-    1.  **OUTPUT FORMAT**: Your entire response MUST be a single, valid JSON object with one key: "sql_query". Do NOT add any introductory text, explanations, or markdown.
-    2.  **CASTING**: When using SUM() on `mytna_vartist_hrn` or `vaha_netto_kg`, you MUST cast them using `SAFE_CAST(column AS FLOAT64)`.
-    3.  **AGGREGATION**: If the user asks for a list of companies/importers/exporters, you MUST `GROUP BY nazva_kompanii, kod_yedrpou` and calculate aggregates like `COUNT(*) as declaration_count` and `SUM(SAFE_CAST(...))`.
-    4.  **SEMANTIC SEARCH**: For searching goods in `opis_tovaru` (e.g., "drone parts"), use a broad `REGEXP_CONTAINS` pattern with `(?i)` flag. For "drone parts," search for 'дрон|квадрокоптер|бпла|безпілотник|пропелер'.
-    5.  **SORTING**: `ORDER BY` the most relevant aggregate metric in `DESC` order.
-    6.  **LIMIT**: `LIMIT` the results to {max_items}.
-    VALID JSON RESPONSE EXAMPLE:
-    {{
-      "sql_query": "SELECT nazva_kompanii, COUNT(*) as declaration_count FROM `{TABLE_ID}` WHERE REGEXP_CONTAINS(opis_tovaru, '(?i)дрон') GROUP BY 1 ORDER BY 2 DESC LIMIT 10"
-    }}
-    USER'S QUESTION: "{user_question}"
-    """
-    try:
-        model = genai.GenerativeModel('models/gemini-pro-latest')
-        safety_settings = { HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE }
-        generation_config = genai.types.GenerationConfig(response_mime_type="application/json")
-        response = model.generate_content(prompt, generation_config=generation_config, safety_settings=safety_settings)
-        response_json = json.loads(response.text)
-        return response_json.get("sql_query")
-    except Exception as e:
-        st.error(f"Помилка при генерації аналітичного SQL запиту: {e}")
-        return None
-
 # --- ФУНКЦИЯ "AI-ПОМОЩНИК ПО КОДАМ" ---
 def get_ai_code_suggestions(product_description):
     if not st.session_state.get('genai_ready', False): return None
     prompt = f"""
-    You are an expert in customs classification and Ukrainian HS codes (УКТЗЕД).
-    Analyze the user's product description. Your goal is to suggest a list of the most relevant 4 to 10-digit HS codes.
-    CRITICAL INSTRUCTIONS:
-    1.  Your entire response MUST be a single, valid JSON object with one key: "suggestions".
-    2.  The value of "suggestions" must be an array of JSON objects.
-    3.  Each object must have two keys: "code" (the HS code as a string) and "description" (a brief explanation in Ukrainian).
-    4.  Do not add any explanations or introductory text.
-    VALID JSON RESPONSE EXAMPLE:
-    {{
-      "suggestions": [
-        {{"code": "88073000", "description": "Частини до безпілотних літальних апаратів"}},
-        {{"code": "85076000", "description": "Акумулятори літій-іонні"}}
-      ]
-    }}
+    You are an expert in customs classification and Ukrainian HS codes (УКТЗЕД)...
     USER'S PRODUCT DESCRIPTION: "{product_description}"
     """
     try:
@@ -163,7 +117,24 @@ def reset_all_filters():
 if not check_password():
     st.stop()
 
-st.sidebar.info(APP_VERSION)
+# --- ИЗМЕНЕНИЕ: Отображаем версию в правом верхнем углу ---
+st.markdown(
+    f"""
+    <style>
+    .version-info {{
+        position: fixed;
+        top: 55px;
+        right: 15px;
+        font-size: 0.8em;
+        color: gray;
+        z-index: 100;
+    }}
+    </style>
+    <div class="version-info">{APP_VERSION}</div>
+    """,
+    unsafe_allow_html=True
+)
+
 st.title("Аналітика Митних Даних 📈")
 initialize_clients()
 if not st.session_state.get('client_ready', False):
@@ -173,25 +144,7 @@ filter_options = get_filter_options()
 if 'selected_directions' not in st.session_state:
     reset_all_filters()
 
-# --- РАЗДЕЛ: AI-АНАЛИТИК ---
-st.header("🤖 AI-Аналитик: Задайте сложный вопрос")
-ai_analytical_question = st.text_area("Задайте ваш вопрос...", key="ai_analytical_question")
-search_button_analytical_ai = st.button("Проанализировать с помощью AI", type="primary")
-if search_button_analytical_ai and ai_analytical_question:
-    with st.spinner("✨ AI-аналитик думает..."):
-        analytical_sql = get_analytical_ai_query(ai_analytical_question)
-        if analytical_sql:
-            st.subheader("Сгенерированный SQL-запрос:")
-            st.code(analytical_sql, language='sql')
-            with st.spinner("Выполняется сложный запрос..."):
-                analytical_results_df = run_query(analytical_sql)
-                st.subheader("Результат анализа:")
-                st.success(f"Анализ завершен. Найдено {len(analytical_results_df)} записей.")
-                st.dataframe(analytical_results_df)
-        else:
-            st.error("Не удалось сгенерировать аналитический SQL-запрос.")
-
-st.divider()
+# --- ИЗМЕНЕНИЕ: РАЗДЕЛ "AI-АНАЛИТИК" УДАЛЕН ---
 
 # --- РАЗДЕЛ: AI-ПОМОЩНИК ПО КОДАМ ---
 st.header("🤖 AI-помощник по кодам УКТЗЕД")
@@ -254,6 +207,7 @@ if search_button_filters:
     if st.session_state.selected_years:
         query_parts.append("EXTRACT(YEAR FROM SAFE_CAST(data_deklaracii AS DATE)) IN UNNEST(@years)")
         query_params.append(ArrayQueryParameter("years", "INT64", st.session_state.selected_years))
+
     if st.session_state.weight_from > 0:
         query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) >= @weight_from")
         query_params.append(ScalarQueryParameter("weight_from", "FLOAT64", st.session_state.weight_from))
