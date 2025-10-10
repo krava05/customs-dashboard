@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 15.0
+# Версия: 15.1
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 15.0"
+APP_VERSION = "Версия 15.1"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -92,7 +92,10 @@ def get_ai_code_suggestions(product_description):
     ОПИС ТОВАРУ: "{product_description}"
     """
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
+        model = genai.GenerativeModel('models/gemini-pro-latest')
+        # -------------------------
+        
         generation_config = genai.types.GenerationConfig(response_mime_type="application/json")
         response = model.generate_content(prompt, generation_config=generation_config)
         
@@ -181,7 +184,6 @@ def find_and_validate_codes(product_description):
 
 @st.cache_data(ttl=3600)
 def get_filter_options():
-    # ... (эта функция без изменений)
     options = {}
     options['direction'] = ['Імпорт', 'Експорт']
     query_countries = f"SELECT DISTINCT kraina_partner FROM `{TABLE_ID}` WHERE kraina_partner IS NOT NULL ORDER BY kraina_partner"
@@ -193,7 +195,6 @@ def get_filter_options():
     return options
 
 def reset_all_filters():
-    # ... (эта функция без изменений)
     st.session_state.selected_directions = []
     st.session_state.selected_countries = []
     st.session_state.selected_transports = []
@@ -261,7 +262,6 @@ if 'selected_directions' not in st.session_state:
 
 st.header("📊 Ручні фільтри")
 with st.expander("Панель Фільтрів", expanded=True):
-    # ... (этот раздел без изменений)
     st.button("Скинути всі фільтри", on_click=reset_all_filters, use_container_width=True, type="secondary")
     st.markdown("---")
     col1, col2, col3 = st.columns(3)
@@ -282,7 +282,6 @@ with st.expander("Панель Фільтрів", expanded=True):
     search_button_filters = st.button("🔍 Знайти за фільтрами", use_container_width=True, type="primary")
 
 if search_button_filters:
-    # ... (этот раздел без изменений)
     query_parts = []; query_params = []
     def process_text_input(input_str): return [item.strip() for item in input_str.split(',') if item.strip()]
     if st.session_state.selected_directions:
