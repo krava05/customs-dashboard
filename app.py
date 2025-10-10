@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 15.2
+# Версия: 15.3
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 15.2"
+APP_VERSION = "Версия 15.3"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -132,6 +132,7 @@ def find_and_validate_codes(product_description):
         
     where_clause = " OR ".join(query_parts)
     
+    # --- ИЗМЕНЕНИЕ ЗДЕСЬ: Замена кавычек в ALIAS ---
     validation_query = f"""
     WITH RankedDescriptions AS (
       SELECT
@@ -149,15 +150,16 @@ def find_and_validate_codes(product_description):
       GROUP BY kod_uktzed
     )
     SELECT
-      rd.kod_uktzed AS "Код УКТЗЕД в базі",
-      rd.opis_tovaru AS "Найчастіший опис в базі",
-      tc.total_declarations AS "Кількість декларацій"
+      rd.kod_uktzed AS `Код УКТЗЕД в базі`,
+      rd.opis_tovaru AS `Найчастіший опис в базі`,
+      tc.total_declarations AS `Кількість декларацій`
     FROM RankedDescriptions rd
     JOIN TotalCounts tc ON rd.kod_uktzed = tc.kod_uktzed
     WHERE rd.rn = 1
     ORDER BY tc.total_declarations DESC
     LIMIT 50
     """
+    # ---------------------------------------------------
     
     job_config = QueryJobConfig(query_parameters=query_params)
     validated_df = run_query(validation_query, job_config=job_config)
@@ -203,7 +205,6 @@ def reset_all_filters():
 if not check_password():
     st.stop()
 
-# --- ИЗМЕНЕНИЕ ЗДЕСЬ: Версия в правом верхнем углу ---
 st.markdown("""
 <style>
 .version-badge {
@@ -220,7 +221,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 st.markdown(f'<p class="version-badge">{APP_VERSION}</p>', unsafe_allow_html=True)
-# ---------------------------------------------------
 
 st.title("Аналітика Митних Даних 📈")
 
@@ -237,14 +237,14 @@ if st.button("💡 Запропонувати та перевірити коди
     if ai_code_description:
         with st.spinner("AI підбирає коди, а ми перевіряємо їх у базі..."):
             validated_df, found, unfound = find_and_validate_codes(ai_code_description)
-            st.session_state.validated_codes_df = validated_df
+            st.session_state.validated_df = validated_df
             st.session_state.found_ai_codes = found
             st.session_state.unfound_ai_codes = unfound
     else:
         st.warning("Будь ласка, введіть опис товару.")
 
-if 'validated_codes_df' in st.session_state:
-    validated_df = st.session_state.validated_codes_df
+if 'validated_df' in st.session_state:
+    validated_df = st.session_state.validated_df
     
     if validated_df is not None and not validated_df.empty:
         st.success(f"✅ Знайдено {len(validated_df)} релевантних кодів у вашій базі даних:")
@@ -258,7 +258,7 @@ if 'validated_codes_df' in st.session_state:
         st.caption(f"Теоретичні коди від AI, для яких не знайдено збігів: `{', '.join(st.session_state.unfound_ai_codes)}`")
 
     if st.button("Очистити результат AI", type="secondary"):
-        keys_to_delete = ['validated_codes_df', 'found_ai_codes', 'unfound_ai_codes']
+        keys_to_delete = ['validated_df', 'found_ai_codes', 'unfound_ai_codes']
         for key in keys_to_delete:
             if key in st.session_state:
                 del st.session_state[key]
