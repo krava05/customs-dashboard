@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 15.1
+# Версия: 15.2
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 15.1"
+APP_VERSION = "Версия 15.2"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -92,10 +92,7 @@ def get_ai_code_suggestions(product_description):
     ОПИС ТОВАРУ: "{product_description}"
     """
     try:
-        # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
         model = genai.GenerativeModel('models/gemini-pro-latest')
-        # -------------------------
-        
         generation_config = genai.types.GenerationConfig(response_mime_type="application/json")
         response = model.generate_content(prompt, generation_config=generation_config)
         
@@ -115,7 +112,6 @@ def get_ai_code_suggestions(product_description):
 def find_and_validate_codes(product_description):
     """Получает коды от AI и проверяет их наличие в базе данных BigQuery."""
     
-    # 1. Получить теоретические коды от AI
     theoretical_codes = get_ai_code_suggestions(product_description)
     
     if theoretical_codes is None or not theoretical_codes:
@@ -127,7 +123,6 @@ def find_and_validate_codes(product_description):
         st.warning("Відповідь AI не містить кодів для перевірки.")
         return None, [], []
 
-    # 2. Построить и выполнить запрос для проверки кодов в BigQuery
     query_parts = []
     query_params = []
     for i, code in enumerate(unique_codes):
@@ -167,10 +162,8 @@ def find_and_validate_codes(product_description):
     job_config = QueryJobConfig(query_parameters=query_params)
     validated_df = run_query(validation_query, job_config=job_config)
     
-    # 3. Определить, какие из предложенных AI кодов дали результат
     found_prefixes = set()
     if not validated_df.empty:
-        # Получаем столбец с кодами, которые нашлись в базе
         db_codes_series = validated_df["Код УКТЗЕД в базі"]
         for db_code in db_codes_series:
             for ai_code in unique_codes:
@@ -210,7 +203,25 @@ def reset_all_filters():
 if not check_password():
     st.stop()
 
-st.sidebar.info(APP_VERSION)
+# --- ИЗМЕНЕНИЕ ЗДЕСЬ: Версия в правом верхнем углу ---
+st.markdown("""
+<style>
+.version-badge {
+    position: fixed;
+    top: 55px;
+    right: 15px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    background-color: #f0f2f6;
+    color: #31333F;
+    font-size: 12px;
+    z-index: 1000;
+}
+</style>
+""", unsafe_allow_html=True)
+st.markdown(f'<p class="version-badge">{APP_VERSION}</p>', unsafe_allow_html=True)
+# ---------------------------------------------------
+
 st.title("Аналітика Митних Даних 📈")
 
 initialize_clients()
