@@ -1,11 +1,11 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 15.1
+# Версия: 14.2
 # Дата: 2025-10-10
 # Описание: 
-# - ИСПРАВЛЕНА КРИТИЧЕСКАЯ ОШИБКА: Восстановлен полный код 
-#   всех функций для исправления IndentationError.
-# - "AI-помощник по кодам" теперь проверяет наличие кодов в базе данных.
+# - Исправлена ошибка синтаксиса (Unterminated string), вызванная
+#   неполным кодом в предыдущих версиях. Восстановлены все
+#   промпты для AI.
 # ===============================================
 
 import os
@@ -20,7 +20,7 @@ from datetime import datetime
 import re
 
 # --- ВЕРСИЯ ПРИЛОЖЕНИЯ ---
-APP_VERSION = "Версия 15.1"
+APP_VERSION = "Версия 14.2"
 
 # --- КОНФИГУРАЦИЯ СТРАНИЦЫ ---
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
@@ -71,28 +71,25 @@ def run_query(query, job_config=None):
             return pd.DataFrame()
     return pd.DataFrame()
 
-# --- ФУНКЦИЯ "AI-АНАЛИТИК" ---
-def get_analytical_ai_query(user_question, max_items=50):
-    if not st.session_state.get('genai_ready', False): return None
-    prompt = f"""
-    You are a SQL generation machine... USER'S QUESTION: "{user_question}"
-    """
-    try:
-        model = genai.GenerativeModel('models/gemini-pro-latest')
-        safety_settings = { HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE }
-        generation_config = genai.types.GenerationConfig(response_mime_type="application/json")
-        response = model.generate_content(prompt, generation_config=generation_config, safety_settings=safety_settings)
-        response_json = json.loads(response.text)
-        return response_json.get("sql_query")
-    except Exception as e:
-        st.error(f"Помилка при генерації аналітичного SQL запиту: {e}")
-        return None
-
 # --- ФУНКЦИЯ "AI-ПОМОЩНИК ПО КОДАМ" ---
 def get_ai_code_suggestions(product_description):
     if not st.session_state.get('genai_ready', False): return None
     prompt = f"""
-    You are an expert in customs classification and Ukrainian HS codes (УКТЗЕД)... USER'S PRODUCT DESCRIPTION: "{product_description}"
+    You are an expert in customs classification and Ukrainian HS codes (УКТЗЕД).
+    Analyze the user's product description. Your goal is to suggest a list of the most relevant 4 to 10-digit HS codes.
+    CRITICAL INSTRUCTIONS:
+    1.  Your entire response MUST be a single, valid JSON object with one key: "suggestions".
+    2.  The value of "suggestions" must be an array of JSON objects.
+    3.  Each object must have two keys: "code" (the HS code as a string) and "description" (a brief explanation in Ukrainian).
+    4.  Do not add any explanations or introductory text.
+    VALID JSON RESPONSE EXAMPLE:
+    {{
+      "suggestions": [
+        {{"code": "88073000", "description": "Частини до безпілотних літальних апаратів"}},
+        {{"code": "85076000", "description": "Акумулятори літій-іонні"}}
+      ]
+    }}
+    USER'S PRODUCT DESCRIPTION: "{product_description}"
     """
     try:
         model = genai.GenerativeModel('models/gemini-pro-latest')
@@ -139,7 +136,23 @@ def reset_all_filters():
 if not check_password():
     st.stop()
 
-st.markdown(f"""<div style="position: fixed; top: 55px; right: 15px; font-size: 0.8em; color: gray; z-index: 100;">{APP_VERSION}</div>""", unsafe_allow_html=True)
+st.markdown(
+    f"""
+    <style>
+    .version-info {{
+        position: fixed;
+        top: 55px;
+        right: 15px;
+        font-size: 0.8em;
+        color: gray;
+        z-index: 100;
+    }}
+    </style>
+    <div class="version-info">{APP_VERSION}</div>
+    """,
+    unsafe_allow_html=True
+)
+
 st.title("Аналітика Митних Даних 📈")
 initialize_clients()
 if not st.session_state.get('client_ready', False):
@@ -149,56 +162,22 @@ filter_options = get_filter_options()
 if 'selected_directions' not in st.session_state:
     reset_all_filters()
 
-# --- РАЗДЕЛ: AI-АНАЛИТИК ---
-st.header("🤖 AI-Аналитик: Задайте сложный вопрос")
-ai_analytical_question = st.text_area("Задайте ваш вопрос...", key="ai_analytical_question")
-search_button_analytical_ai = st.button("Проанализировать с помощью AI", type="primary")
-if search_button_analytical_ai and ai_analytical_question:
-    with st.spinner("✨ AI-аналитик думает..."):
-        analytical_sql = get_analytical_ai_query(ai_analytical_question)
-        if analytical_sql:
-            st.code(analytical_sql, language='sql')
-            with st.spinner("Выполняется сложный запрос..."):
-                analytical_results_df = run_query(analytical_sql)
-                st.dataframe(analytical_results_df)
-        else:
-            st.error("Не удалось сгенерировать аналитический SQL-запрос.")
-
-st.divider()
-
 # --- РАЗДЕЛ: AI-ПОМОЩНИК ПО КОДАМ ---
 st.header("🤖 AI-помощник по кодам УКТЗЕД")
 ai_code_description = st.text_input("Введите описание товара...", key="ai_code_helper_input")
 if st.button("Предложить коды"):
     if ai_code_description:
-        with st.spinner("Этап 1/2: AI подбирает теоретические коды..."):
-            theoretical_codes = get_ai_code_suggestions(ai_code_description)
-        if theoretical_codes:
-            df_theoretical = pd.DataFrame(theoretical_codes)
-            code_list = df_theoretical['code'].tolist()
-            with st.spinner("Этап 2/2: Проверяем наличие кодов в вашей базе..."):
-                query_check = f"SELECT kod_uktzed, COUNT(*) as usage_count FROM `{TABLE_ID}` WHERE kod_uktzed IN UNNEST(@codes) GROUP BY kod_uktzed"
-                job_config_check = QueryJobConfig(query_parameters=[ArrayQueryParameter("codes", "STRING", code_list)])
-                df_existing = run_query(query_check, job_config=job_config_check)
-                if not df_existing.empty:
-                    df_final = pd.merge(df_theoretical, df_existing, left_on='code', right_on='kod_uktzed', how='inner')
-                    df_final = df_final.rename(columns={'code': 'Код', 'description': 'Описание', 'usage_count': 'Кол-во в базе'})
-                    st.session_state.suggested_codes_table = df_final[['Код', 'Описание', 'Кол-во в базе']].sort_values(by='Кол-во в базе', ascending=False)
-                else:
-                    st.session_state.suggested_codes_table = pd.DataFrame()
-        else:
-            st.session_state.suggested_codes_table = None
+        with st.spinner("AI подбирает коды..."):
+            st.session_state.suggested_codes = get_ai_code_suggestions(ai_code_description)
     else:
         st.warning("Введите описание товара.")
 
-if 'suggested_codes_table' in st.session_state and st.session_state.suggested_codes_table is not None:
-    if not st.session_state.suggested_codes_table.empty:
-        st.success("Найдено совпадение кодов с вашей базой данных:")
-        st.dataframe(st.session_state.suggested_codes_table, use_container_width=True)
-    else:
-        st.info("AI предложил релевантные коды, но ни один из них пока не найден в вашей базе данных.")
+if 'suggested_codes' in st.session_state and st.session_state.suggested_codes:
+    st.success("Рекомендуемые коды:")
+    df_suggestions = pd.DataFrame(st.session_state.suggested_codes)
+    st.dataframe(df_suggestions, use_container_width=True)
     if st.button("Очистить результат", type="secondary"):
-        st.session_state.suggested_codes_table = None
+        st.session_state.suggested_codes = None
         st.rerun()
 
 st.divider()
@@ -208,6 +187,7 @@ st.header("📊 Ручные фильтры")
 with st.expander("Панель Фильтров", expanded=True):
     st.button("Сбросить все фильтры", on_click=reset_all_filters, use_container_width=True, type="secondary")
     st.markdown("---")
+    
     col1, col2, col3 = st.columns(3)
     with col1: st.multiselect("Напрямок:", options=filter_options['direction'], key='selected_directions')
     with col2: st.multiselect("Країна-партнер:", options=filter_options['countries'], key='selected_countries')
@@ -223,12 +203,14 @@ with st.expander("Панель Фильтров", expanded=True):
     with col6: st.text_input("Код УКТЗЕД (через кому):", key='uktzed_input')
     with col7: st.text_input("Код ЄДРПОУ (через кому):", key='yedrpou_input')
     with col8: st.text_input("Назва компанії (через кому):", key='company_input')
+    
     search_button_filters = st.button("🔍 Знайти за фильтрами", use_container_width=True, type="primary")
 
 # --- ЛОГИКА ФИЛЬТРОВ ---
 if search_button_filters:
     query_parts = []; query_params = []
     def process_text_input(input_str): return [item.strip() for item in input_str.split(',') if item.strip()]
+
     if st.session_state.selected_directions:
         query_parts.append("napryamok IN UNNEST(@directions)")
         query_params.append(ArrayQueryParameter("directions", "STRING", st.session_state.selected_directions))
@@ -241,12 +223,14 @@ if search_button_filters:
     if st.session_state.selected_years:
         query_parts.append("EXTRACT(YEAR FROM SAFE_CAST(data_deklaracii AS DATE)) IN UNNEST(@years)")
         query_params.append(ArrayQueryParameter("years", "INT64", st.session_state.selected_years))
+
     if st.session_state.weight_from > 0:
         query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) >= @weight_from")
         query_params.append(ScalarQueryParameter("weight_from", "FLOAT64", st.session_state.weight_from))
     if st.session_state.weight_to > 0 and st.session_state.weight_to >= st.session_state.weight_from:
         query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) <= @weight_to")
         query_params.append(ScalarQueryParameter("weight_to", "FLOAT64", st.session_state.weight_to))
+
     uktzed_list = process_text_input(st.session_state.uktzed_input)
     if uktzed_list:
         conditions = []
@@ -255,10 +239,12 @@ if search_button_filters:
             conditions.append(f"kod_uktzed LIKE @{param_name}")
             query_params.append(ScalarQueryParameter(param_name, "STRING", f"{item}%"))
         query_parts.append(f"({' OR '.join(conditions)})")
+
     yedrpou_list = process_text_input(st.session_state.yedrpou_input)
     if yedrpou_list:
         query_parts.append("kod_yedrpou IN UNNEST(@yedrpou)")
         query_params.append(ArrayQueryParameter("yedrpou", "STRING", yedrpou_list))
+
     company_list = process_text_input(st.session_state.company_input)
     if company_list:
         conditions = []
@@ -267,6 +253,7 @@ if search_button_filters:
             conditions.append(f"UPPER(nazva_kompanii) LIKE @{param_name}")
             query_params.append(ScalarQueryParameter(param_name, "STRING", f"%{item.upper()}%"))
         query_parts.append(f"({' OR '.join(conditions)})")
+    
     if not query_parts:
         st.warning("Будь ласка, оберіть хоча б один фільтр.")
     else:
