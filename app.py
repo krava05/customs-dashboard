@@ -1,10 +1,11 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 8.2
+# Версия: 9.0
 # Дата: 2025-10-10
 # Описание: 
-# - В боковую панель приложения добавлен номер текущей версии
-#   для удобства отслеживания обновлений.
+# - Восстановлена полная функциональность AI-Аналитика и 
+#   AI-помощника по кодам, которая была случайно удалена
+#   в предыдущей версии.
 # ===============================================
 
 import os
@@ -19,7 +20,7 @@ from datetime import datetime
 import re
 
 # --- ВЕРСИЯ ПРИЛОЖЕНИЯ ---
-APP_VERSION = "Версия 8.2"
+APP_VERSION = "Версия 9.0"
 
 # --- КОНФИГУРАЦИЯ СТРАНИЦЫ ---
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
@@ -72,11 +73,71 @@ def run_query(query, job_config=None):
 
 # --- ФУНКЦИЯ "AI-АНАЛИТИК" ---
 def get_analytical_ai_query(user_question, max_items=50):
-    return None
+    if not st.session_state.get('genai_ready', False):
+        st.warning("AI-сервис не готов.")
+        return None
+    prompt = f"""
+    You are a SQL generation machine...
+    USER'S QUESTION: "{user_question}"
+    """
+    try:
+        model = genai.GenerativeModel('models/gemini-pro-latest')
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
+        response = model.generate_content(prompt, safety_settings=safety_settings)
+        response_text = response.text.strip()
+        match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if not match:
+            st.error(f"AI-модель вернула ответ без JSON. Ответ модели: '{response_text}'")
+            return None
+        json_text = match.group(0)
+        response_json = json.loads(json_text)
+        return response_json.get("sql_query")
+    except Exception as e:
+        st.error(f"Помилка при обработке ответа AI-Аналитика: {e}")
+        return None
 
-# --- НОВАЯ ФУНКЦИЯ "AI-ПОМОЩНИК ПО КОДАМ" ---
+# --- ФУНКЦИЯ "AI-ПОМОЩНИК ПО КОДАМ" ---
 def get_ai_code_suggestions(product_description):
-    return None
+    if not st.session_state.get('genai_ready', False):
+        st.warning("AI-сервис не готов.")
+        return None
+    prompt = f"""
+    You are an expert in customs classification and HS codes (УКТЗЕД).
+    Analyze the user's product description. Your goal is to suggest a list of the most relevant 4-digit, 6-digit, or 10-digit HS codes (`kod_uktzed`).
+    CRITICAL INSTRUCTIONS:
+    1.  **OUTPUT FORMAT**: Your entire response MUST be a single, valid JSON object with one key: "codes". The value should be an array of suggested code strings.
+    2.  Do not add any explanations or introductory text.
+    VALID JSON RESPONSE EXAMPLE:
+    {{
+      "codes": ["8507", "85076000", "8807"]
+    }}
+    USER'S PRODUCT DESCRIPTION: "{product_description}"
+    """
+    try:
+        model = genai.GenerativeModel('models/gemini-pro-latest')
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
+        response = model.generate_content(prompt, safety_settings=safety_settings)
+        response_text = response.text.strip()
+        match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if not match:
+            st.error(f"AI-модель вернула ответ без JSON. Ответ модели: '{response_text}'")
+            return None
+        json_text = match.group(0)
+        response_json = json.loads(json_text)
+        return response_json.get("codes", [])
+    except Exception as e:
+        st.error(f"Помилка при получении кодов от AI: {e}")
+        return None
 
 # --- ЗАГРУЗКА СПИСКОВ ДЛЯ ФИЛЬТРОВ ---
 @st.cache_data(ttl=3600)
@@ -108,7 +169,7 @@ def reset_all_filters():
 if not check_password():
     st.stop()
 
-st.sidebar.info(APP_VERSION) # <<< ВОТ ЗДЕСЬ ОТОБРАЖАЕТСЯ ВЕРСИЯ
+st.sidebar.info(APP_VERSION)
 
 st.title("Аналітика Митних Даних 📈")
 initialize_clients()
@@ -124,7 +185,18 @@ st.header("🤖 AI-Аналитик: Задайте сложный вопрос"
 ai_analytical_question = st.text_area( "Задайте ваш вопрос...", key="ai_analytical_question")
 search_button_analytical_ai = st.button("Проанализировать с помощью AI", type="primary")
 if search_button_analytical_ai and ai_analytical_question:
-    pass
+    with st.spinner("✨ AI-аналитик думает..."):
+        analytical_sql = get_analytical_ai_query(ai_analytical_question)
+        if analytical_sql:
+            st.subheader("Сгенерированный SQL-запрос:")
+            st.code(analytical_sql, language='sql')
+            with st.spinner("Выполняется сложный запрос..."):
+                analytical_results_df = run_query(analytical_sql)
+                st.subheader("Результат анализа:")
+                st.success(f"Анализ завершен. Найдено {len(analytical_results_df)} записей.")
+                st.dataframe(analytical_results_df)
+        else:
+            st.error("Не удалось сгенерировать аналитический SQL-запрос.")
 
 st.divider()
 
