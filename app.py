@@ -1,10 +1,12 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 10.1
+# Версия: 10.2
 # Дата: 2025-10-10
 # Описание: 
-# - Восстановлена логика работы ручных фильтров и AI-Аналитика,
-#   которая отсутствовала в базовой Версии 10.0.
+# - Восстановлена полная функциональность AI-помощника по кодам.
+# - Добавлены полные настройки безопасности для AI-помощника, чтобы
+#   предотвратить молчаливую блокировку запросов.
+# - Улучшен вывод ошибок для AI-функций.
 # ===============================================
 
 import os
@@ -19,7 +21,7 @@ from datetime import datetime
 import re
 
 # --- ВЕРСИЯ ПРИЛОЖЕНИЯ ---
-APP_VERSION = "Версия 10.1"
+APP_VERSION = "Версия 10.2"
 
 # --- КОНФИГУРАЦИЯ СТРАНИЦЫ ---
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
@@ -76,40 +78,61 @@ def get_analytical_ai_query(user_question, max_items=50):
         st.warning("AI-сервис не готов.")
         return None
     prompt = f"""
-    You are an expert SQL analyst... 
-    USER'S QUESTION: "{user_question}"
+    You are a SQL generation machine... USER'S QUESTION: "{user_question}"
     """
     try:
         model = genai.GenerativeModel('models/gemini-pro-latest')
-        safety_settings = { HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE }
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
         response = model.generate_content(prompt, safety_settings=safety_settings)
         response_text = response.text.strip()
         match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if not match: return None
+        if not match:
+            st.error(f"AI-Аналитик вернул ответ без JSON. Ответ: '{response_text}'")
+            return None
         json_text = match.group(0)
         response_json = json.loads(json_text)
         return response_json.get("sql_query")
-    except Exception:
+    except Exception as e:
+        st.error(f"Ошибка при обработке ответа AI-Аналитика: {e}")
         return None
 
-# --- ФУНКЦИЯ "AI-ПОМОЩНИК ПО КОДАМ" ---
+# --- ФУНКЦИЯ "AI-ПОМОЩНИК ПО КОДАМ" (ИСПРАВЛЕНА) ---
 def get_ai_code_suggestions(product_description):
     if not st.session_state.get('genai_ready', False):
         st.warning("AI-сервис не готов.")
         return None
-    prompt = f"""You are an expert in customs classification... USER'S PRODUCT DESCRIPTION: "{product_description}" """
+    
+    prompt = f"""
+    You are an expert in customs classification... USER'S PRODUCT DESCRIPTION: "{product_description}"
+    """
     try:
         model = genai.GenerativeModel('models/gemini-pro-latest')
-        safety_settings = { HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE }
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
         response = model.generate_content(prompt, safety_settings=safety_settings)
+        
         response_text = response.text.strip()
         match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if not match: return None
+        if not match:
+            st.error(f"AI-помощник вернул ответ без JSON. Ответ: '{response_text}'")
+            return None
+        
         json_text = match.group(0)
         response_json = json.loads(json_text)
         return response_json.get("suggestions", [])
-    except Exception:
+    except Exception as e:
+        st.error(f"Ошибка при получении кодов от AI: {e}")
         return None
+
 
 # --- ЗАГРУЗКА СПИСКОВ ДЛЯ ФИЛЬТРОВ ---
 @st.cache_data(ttl=3600)
@@ -136,6 +159,7 @@ def reset_all_filters():
     st.session_state.yedrpou_input = ""
     st.session_state.company_input = ""
 
+
 # --- ОСНОВНОЙ ИНТЕРФЕЙС ПРИЛОЖЕНИЯ ---
 if not check_password():
     st.stop()
@@ -150,7 +174,7 @@ filter_options = get_filter_options()
 if 'selected_directions' not in st.session_state:
     reset_all_filters()
 
-# --- РАЗДЕЛ: AI-АНАЛИТИК (ЛОГИКА ВОССТАНОВЛЕНА) ---
+# --- РАЗДЕЛ: AI-АНАЛИТИК ---
 st.header("🤖 AI-Аналитик: Задайте сложный вопрос")
 ai_analytical_question = st.text_area("Задайте ваш вопрос...", key="ai_analytical_question")
 search_button_analytical_ai = st.button("Проанализировать с помощью AI", type="primary")
@@ -216,7 +240,7 @@ with st.expander("Панель Фильтров", expanded=True):
     
     search_button_filters = st.button("🔍 Знайти за фильтрами", use_container_width=True, type="primary")
 
-# --- ЛОГИКА ФИЛЬТРОВ (ВОССТАНОВЛЕНА) ---
+# --- ЛОГИКА ФИЛЬТРОВ ---
 if search_button_filters:
     query_parts = []; query_params = []
     def process_text_input(input_str): return [item.strip() for item in input_str.split(',') if item.strip()]
