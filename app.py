@@ -1,10 +1,11 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 14.0
+# Версия: 14.1
 # Дата: 2025-10-10
 # Описание: 
-# - Убран раздел "AI-Аналитик".
-# - Номер версии перемещен в правый верхний угол экрана.
+# - Улучшена обработка ответа от AI-помощника. Теперь код 
+#   корректно работает, даже если AI возвращает список напрямую,
+#   а не объект. Это исправляет ошибку "'list' object has no attribute 'get'".
 # ===============================================
 
 import os
@@ -19,7 +20,7 @@ from datetime import datetime
 import re
 
 # --- ВЕРСИЯ ПРИЛОЖЕНИЯ ---
-APP_VERSION = "Версия 14.0"
+APP_VERSION = "Версия 14.1"
 
 # --- КОНФИГУРАЦИЯ СТРАНИЦЫ ---
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
@@ -74,7 +75,20 @@ def run_query(query, job_config=None):
 def get_ai_code_suggestions(product_description):
     if not st.session_state.get('genai_ready', False): return None
     prompt = f"""
-    You are an expert in customs classification and Ukrainian HS codes (УКТЗЕД)...
+    You are an expert in customs classification and Ukrainian HS codes (УКТЗЕД).
+    Analyze the user's product description. Your goal is to suggest a list of the most relevant 4 to 10-digit HS codes.
+    CRITICAL INSTRUCTIONS:
+    1.  Your entire response MUST be a single, valid JSON object with one key: "suggestions".
+    2.  The value of "suggestions" must be an array of JSON objects.
+    3.  Each object must have two keys: "code" (the HS code as a string) and "description" (a brief explanation in Ukrainian).
+    4.  Do not add any explanations or introductory text.
+    VALID JSON RESPONSE EXAMPLE:
+    {{
+      "suggestions": [
+        {{"code": "88073000", "description": "Частини до безпілотних літальних апаратів"}},
+        {{"code": "85076000", "description": "Акумулятори літій-іонні"}}
+      ]
+    }}
     USER'S PRODUCT DESCRIPTION: "{product_description}"
     """
     try:
@@ -83,7 +97,16 @@ def get_ai_code_suggestions(product_description):
         generation_config = genai.types.GenerationConfig(response_mime_type="application/json")
         response = model.generate_content(prompt, generation_config=generation_config, safety_settings=safety_settings)
         response_json = json.loads(response.text)
-        return response_json.get("suggestions", [])
+        
+        # <<< ИЗМЕНЕНИЕ ЗДЕСЬ >>>
+        # Проверяем, вернула ли модель объект (как просили) или сразу список
+        if isinstance(response_json, dict):
+            return response_json.get("suggestions", [])
+        elif isinstance(response_json, list):
+            return response_json
+        else:
+            return []
+            
     except Exception as e:
         st.error(f"Помилка при получении кодов от AI: {e}")
         return None
@@ -117,135 +140,7 @@ def reset_all_filters():
 if not check_password():
     st.stop()
 
-# --- ИЗМЕНЕНИЕ: Отображаем версию в правом верхнем углу ---
 st.markdown(
     f"""
-    <style>
-    .version-info {{
-        position: fixed;
-        top: 55px;
-        right: 15px;
-        font-size: 0.8em;
-        color: gray;
-        z-index: 100;
-    }}
-    </style>
+    <style> .version-info {{ position: fixed; top: 55px; right: 15px; font-size: 0.8em; color: gray; z-index: 100; }} </style>
     <div class="version-info">{APP_VERSION}</div>
-    """,
-    unsafe_allow_html=True
-)
-
-st.title("Аналітика Митних Даних 📈")
-initialize_clients()
-if not st.session_state.get('client_ready', False):
-    st.error("❌ Не вдалося підключитися до Google BigQuery."); st.stop()
-
-filter_options = get_filter_options()
-if 'selected_directions' not in st.session_state:
-    reset_all_filters()
-
-# --- ИЗМЕНЕНИЕ: РАЗДЕЛ "AI-АНАЛИТИК" УДАЛЕН ---
-
-# --- РАЗДЕЛ: AI-ПОМОЩНИК ПО КОДАМ ---
-st.header("🤖 AI-помощник по кодам УКТЗЕД")
-ai_code_description = st.text_input("Введите описание товара...", key="ai_code_helper_input")
-if st.button("Предложить коды"):
-    if ai_code_description:
-        with st.spinner("AI подбирает коды..."):
-            st.session_state.suggested_codes = get_ai_code_suggestions(ai_code_description)
-    else:
-        st.warning("Введите описание товара.")
-
-if 'suggested_codes' in st.session_state and st.session_state.suggested_codes:
-    st.success("Рекомендуемые коды:")
-    df_suggestions = pd.DataFrame(st.session_state.suggested_codes)
-    st.dataframe(df_suggestions, use_container_width=True)
-    if st.button("Очистить результат", type="secondary"):
-        st.session_state.suggested_codes = None
-        st.rerun()
-
-st.divider()
-
-# --- СЕКЦИЯ РУЧНЫХ ФИЛЬТРОВ ---
-st.header("📊 Ручные фильтры")
-with st.expander("Панель Фильтров", expanded=True):
-    st.button("Сбросить все фильтры", on_click=reset_all_filters, use_container_width=True, type="secondary")
-    st.markdown("---")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1: st.multiselect("Напрямок:", options=filter_options['direction'], key='selected_directions')
-    with col2: st.multiselect("Країна-партнер:", options=filter_options['countries'], key='selected_countries')
-    with col3: st.multiselect("Вид транспорту:", options=filter_options['transport'], key='selected_transports')
-    col4, col5 = st.columns([2,1])
-    with col4: st.multiselect("Роки:", options=filter_options['years'], key='selected_years')
-    with col5:
-        st.write("Вага нетто, кг")
-        weight_col1, weight_col2 = st.columns(2)
-        weight_from = weight_col1.number_input("Від", min_value=0, step=100, key="weight_from")
-        weight_to = weight_col2.number_input("До", min_value=0, step=100, key="weight_to")
-    col6, col7, col8 = st.columns(3)
-    with col6: st.text_input("Код УКТЗЕД (через кому):", key='uktzed_input')
-    with col7: st.text_input("Код ЄДРПОУ (через кому):", key='yedrpou_input')
-    with col8: st.text_input("Назва компанії (через кому):", key='company_input')
-    
-    search_button_filters = st.button("🔍 Знайти за фильтрами", use_container_width=True, type="primary")
-
-# --- ЛОГИКА ФИЛЬТРОВ ---
-if search_button_filters:
-    query_parts = []; query_params = []
-    def process_text_input(input_str): return [item.strip() for item in input_str.split(',') if item.strip()]
-
-    if st.session_state.selected_directions:
-        query_parts.append("napryamok IN UNNEST(@directions)")
-        query_params.append(ArrayQueryParameter("directions", "STRING", st.session_state.selected_directions))
-    if st.session_state.selected_countries:
-        query_parts.append("kraina_partner IN UNNEST(@countries)")
-        query_params.append(ArrayQueryParameter("countries", "STRING", st.session_state.selected_countries))
-    if st.session_state.selected_transports:
-        query_parts.append("vyd_transportu IN UNNEST(@transports)")
-        query_params.append(ArrayQueryParameter("transports", "STRING", st.session_state.selected_transports))
-    if st.session_state.selected_years:
-        query_parts.append("EXTRACT(YEAR FROM SAFE_CAST(data_deklaracii AS DATE)) IN UNNEST(@years)")
-        query_params.append(ArrayQueryParameter("years", "INT64", st.session_state.selected_years))
-
-    if st.session_state.weight_from > 0:
-        query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) >= @weight_from")
-        query_params.append(ScalarQueryParameter("weight_from", "FLOAT64", st.session_state.weight_from))
-    if st.session_state.weight_to > 0 and st.session_state.weight_to >= st.session_state.weight_from:
-        query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) <= @weight_to")
-        query_params.append(ScalarQueryParameter("weight_to", "FLOAT64", st.session_state.weight_to))
-
-    uktzed_list = process_text_input(st.session_state.uktzed_input)
-    if uktzed_list:
-        conditions = []
-        for i, item in enumerate(uktzed_list):
-            param_name = f"uktzed{i}"
-            conditions.append(f"kod_uktzed LIKE @{param_name}")
-            query_params.append(ScalarQueryParameter(param_name, "STRING", f"{item}%"))
-        query_parts.append(f"({' OR '.join(conditions)})")
-
-    yedrpou_list = process_text_input(st.session_state.yedrpou_input)
-    if yedrpou_list:
-        query_parts.append("kod_yedrpou IN UNNEST(@yedrpou)")
-        query_params.append(ArrayQueryParameter("yedrpou", "STRING", yedrpou_list))
-
-    company_list = process_text_input(st.session_state.company_input)
-    if company_list:
-        conditions = []
-        for i, item in enumerate(company_list):
-            param_name = f"company{i}"
-            conditions.append(f"UPPER(nazva_kompanii) LIKE @{param_name}")
-            query_params.append(ScalarQueryParameter(param_name, "STRING", f"%{item.upper()}%"))
-        query_parts.append(f"({' OR '.join(conditions)})")
-    
-    if not query_parts:
-        st.warning("Будь ласка, оберіть хоча б один фільтр.")
-    else:
-        where_clause = " AND ".join(query_parts)
-        final_query = f"SELECT * FROM `{TABLE_ID}` WHERE {where_clause} LIMIT 1000"
-        job_config = QueryJobConfig(query_parameters=query_params)
-        st.code(final_query, language='sql')
-        with st.spinner("Виконується запит..."):
-            results_df = run_query(final_query, job_config=job_config)
-            st.success(f"Знайдено {len(results_df)} записів.")
-            st.dataframe(results_df)
