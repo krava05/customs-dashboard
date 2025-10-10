@@ -1,10 +1,11 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 7.2
+# Версия: 7.3
 # Дата: 2025-10-10
 # Описание: 
-# - Исправлена синтаксическая ошибка (SyntaxError), вызванная
-#   неправильным расположением функции reset_all_filters.
+# - Добавлены настройки безопасности (safety_settings) в вызов AI-модели.
+#   Это решает проблему с пустым ответом от AI на запросы со 
+#   словами типа "дрон", исправляя ошибку JSON "Expecting value".
 # ===============================================
 
 import os
@@ -13,6 +14,8 @@ from google.cloud import bigquery
 from google.cloud.bigquery import QueryJobConfig, ArrayQueryParameter, ScalarQueryParameter
 import pandas as pd
 import google.generativeai as genai
+# НОВЫЙ ИМПОРТ для настроек безопасности
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import json
 from datetime import datetime
 
@@ -25,6 +28,7 @@ TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 
 # --- ФУНКЦИЯ ПРОВЕРКИ ПАРОЛЯ ---
 def check_password():
+    # ... (код без изменений) ...
     def password_entered():
         if os.environ.get('K_SERVICE'): correct_password = os.environ.get("APP_PASSWORD")
         else: correct_password = st.secrets.get("APP_PASSWORD")
@@ -38,6 +42,7 @@ def check_password():
 
 # --- ИНИЦИАЛИЗАЦИЯ КЛИЕНТОВ GOOGLE ---
 def initialize_clients():
+    # ... (код без изменений) ...
     if 'clients_initialized' in st.session_state: return
     try:
         if os.environ.get('K_SERVICE'):
@@ -58,6 +63,7 @@ def initialize_clients():
 # --- ФУНКЦИЯ ЗАГРУЗКИ ДАННЫХ ---
 @st.cache_data(ttl=3600)
 def run_query(query, job_config=None):
+    # ... (код без изменений) ...
     if st.session_state.get('client_ready', False):
         try:
             return st.session_state.bq_client.query(query, job_config=job_config).to_dataframe()
@@ -71,14 +77,29 @@ def get_analytical_ai_query(user_question, max_items=50):
     if not st.session_state.get('genai_ready', False):
         st.warning("AI-сервис не готов.")
         return None
+    
     prompt = f"""
     You are an expert SQL analyst... 
     USER'S QUESTION: "{user_question}"
     """
     try:
         model = genai.GenerativeModel('models/gemini-pro-latest')
-        response = model.generate_content(prompt)
+        
+        # ИЗМЕНЕНИЕ: Добавляем настройки, чтобы отключить блокировку
+        safety_settings = {
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        }
+
+        response = model.generate_content(prompt, safety_settings=safety_settings)
+        
+        # Для отладки посмотрим, что возвращает модель
+        print(f"Raw AI response: {response.text}")
+
         response_text = response.text.strip().replace("```json", "").replace("```", "")
+        if not response_text:
+            st.error("AI-модель вернула пустой ответ. Возможно, запрос был заблокирован несмотря на настройки безопасности.")
+            return None
+
         response_json = json.loads(response_text)
         return response_json.get("sql_query")
     except Exception as e:
@@ -86,6 +107,7 @@ def get_analytical_ai_query(user_question, max_items=50):
         return None
 
 # --- ЗАГРУЗКА СПИСКОВ ДЛЯ ФИЛЬТРОВ ---
+# ... (остальной код до конца без изменений) ...
 @st.cache_data(ttl=3600)
 def get_filter_options():
     options = {}
@@ -98,7 +120,6 @@ def get_filter_options():
     options['years'] = list(run_query(query_years)['year'].dropna().astype(int))
     return options
 
-# --- ЛОГИКА СБРОСА ФИЛЬТРОВ ---
 def reset_all_filters():
     st.session_state.selected_directions = []
     st.session_state.selected_countries = []
@@ -110,7 +131,6 @@ def reset_all_filters():
     st.session_state.yedrpou_input = ""
     st.session_state.company_input = ""
 
-# --- ОСНОВНОЙ ИНТЕРФЕЙС ПРИЛОЖЕНИЯ ---
 if not check_password():
     st.stop()
 
@@ -123,9 +143,8 @@ filter_options = get_filter_options()
 if 'selected_directions' not in st.session_state:
     reset_all_filters()
 
-# --- РАЗДЕЛ: AI-АНАЛИТИК ---
 st.header("🤖 AI-Аналитик: Задайте сложный вопрос")
-ai_analytical_question = st.text_area("Задайте ваш вопрос...", key="ai_analytical_question")
+ai_analytical_question = st.text_area( "Задайте ваш вопрос...", key="ai_analytical_question")
 search_button_analytical_ai = st.button("Проанализировать с помощью AI", type="primary")
 if search_button_analytical_ai and ai_analytical_question:
     with st.spinner("✨ AI-аналитик думает..."):
@@ -143,17 +162,14 @@ if search_button_analytical_ai and ai_analytical_question:
 
 st.divider()
 
-# --- СЕКЦИЯ ФИЛЬТРОВ ---
 st.header("📊 Ручные фильтры")
 with st.expander("Панель Фильтров", expanded=True):
     st.button("Сбросить все фильтры", on_click=reset_all_filters, use_container_width=True, type="secondary")
     st.markdown("---")
-    
     col1, col2, col3 = st.columns(3)
     with col1: st.multiselect("Напрямок:", options=filter_options['direction'], key='selected_directions')
     with col2: st.multiselect("Країна-партнер:", options=filter_options['countries'], key='selected_countries')
     with col3: st.multiselect("Вид транспорту:", options=filter_options['transport'], key='selected_transports')
-
     col4, col5 = st.columns([2,1])
     with col4: st.multiselect("Роки:", options=filter_options['years'], key='selected_years')
     with col5:
@@ -161,19 +177,15 @@ with st.expander("Панель Фильтров", expanded=True):
         weight_col1, weight_col2 = st.columns(2)
         weight_from = weight_col1.number_input("Від", min_value=0, step=100, key="weight_from")
         weight_to = weight_col2.number_input("До", min_value=0, step=100, key="weight_to")
-
     col6, col7, col8 = st.columns(3)
     with col6: st.text_input("Код УКТЗЕД (через кому):", key='uktzed_input')
     with col7: st.text_input("Код ЄДРПОУ (через кому):", key='yedrpou_input')
     with col8: st.text_input("Назва компанії (через кому):", key='company_input')
-    
     search_button_filters = st.button("🔍 Знайти за фильтрами", use_container_width=True, type="primary")
 
-# --- ЛОГИКА ФИЛЬТРОВ ---
 if search_button_filters:
     query_parts = []; query_params = []
     def process_text_input(input_str): return [item.strip() for item in input_str.split(',') if item.strip()]
-
     if st.session_state.selected_directions:
         query_parts.append("napryamok IN UNNEST(@directions)")
         query_params.append(ArrayQueryParameter("directions", "STRING", st.session_state.selected_directions))
@@ -186,14 +198,12 @@ if search_button_filters:
     if st.session_state.selected_years:
         query_parts.append("EXTRACT(YEAR FROM SAFE_CAST(data_deklaracii AS DATE)) IN UNNEST(@years)")
         query_params.append(ArrayQueryParameter("years", "INT64", st.session_state.selected_years))
-
     if st.session_state.weight_from > 0:
         query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) >= @weight_from")
         query_params.append(ScalarQueryParameter("weight_from", "FLOAT64", st.session_state.weight_from))
     if st.session_state.weight_to > 0 and st.session_state.weight_to >= st.session_state.weight_from:
         query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) <= @weight_to")
         query_params.append(ScalarQueryParameter("weight_to", "FLOAT64", st.session_state.weight_to))
-
     uktzed_list = process_text_input(st.session_state.uktzed_input)
     if uktzed_list:
         conditions = []
@@ -202,12 +212,10 @@ if search_button_filters:
             conditions.append(f"kod_uktzed LIKE @{param_name}")
             query_params.append(ScalarQueryParameter(param_name, "STRING", f"{item}%"))
         query_parts.append(f"({' OR '.join(conditions)})")
-
     yedrpou_list = process_text_input(st.session_state.yedrpou_input)
     if yedrpou_list:
         query_parts.append("kod_yedrpou IN UNNEST(@yedrpou)")
         query_params.append(ArrayQueryParameter("yedrpou", "STRING", yedrpou_list))
-
     company_list = process_text_input(st.session_state.company_input)
     if company_list:
         conditions = []
@@ -216,7 +224,6 @@ if search_button_filters:
             conditions.append(f"UPPER(nazva_kompanii) LIKE @{param_name}")
             query_params.append(ScalarQueryParameter(param_name, "STRING", f"%{item.upper()}%"))
         query_parts.append(f"({' OR '.join(conditions)})")
-    
     if not query_parts:
         st.warning("Будь ласка, оберіть хоча б один фільтр.")
     else:
