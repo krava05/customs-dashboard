@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 16.1
+# Версия: 16.2
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 16.1"
+APP_VERSION = "Версия 16.2"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -277,7 +277,6 @@ with st.expander("Панель Фільтрів", expanded=True):
     st.button("Скинути всі фільтри", on_click=reset_all_filters, use_container_width=True, type="secondary")
     st.markdown("---")
     
-    # --- ИЗМЕНЕНИЕ: Перекомпоновка фильтров для компактности ---
     # Верхний ряд
     col1, col2, col3, col4, col5 = st.columns([2, 3, 2, 1, 1])
     with col1:
@@ -291,13 +290,14 @@ with st.expander("Панель Фільтрів", expanded=True):
     with col5:
         st.multiselect("Місяці:", options=filter_options['months'], key='selected_months')
 
+    # --- ИЗМЕНЕНИЕ: Выравнивание нижнего ряда фильтров ---
     # Нижний ряд
-    col6, col7, col8, col9 = st.columns([1, 2, 2, 2])
+    col6, col7, col8, col9 = st.columns(4)
     with col6:
-        st.write("Вага нетто, кг")
+        # Для лучшего выравнивания используем два отдельных виджета с видимыми заголовками
         w_col1, w_col2 = st.columns(2)
-        w_col1.number_input("Від", min_value=0, step=100, key="weight_from", label_visibility="collapsed")
-        w_col2.number_input("До", min_value=0, step=100, key="weight_to", label_visibility="collapsed")
+        w_col1.number_input("Вага від, кг", min_value=0, step=100, key="weight_from")
+        w_col2.number_input("Вага до, кг", min_value=0, step=100, key="weight_to")
     with col7:
         st.text_input("Код УКТЗЕД (через кому):", key='uktzed_input')
     with col8:
