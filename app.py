@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 15.4
+# Версия: 16.0
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 15.4"
+APP_VERSION = "Версия 16.0"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -174,7 +174,7 @@ def find_and_validate_codes(product_description):
     
     return validated_df, list(found_prefixes), list(unfound_codes)
 
-
+# --- ИЗМЕНЕНИЕ 1: Добавление месяцев ---
 @st.cache_data(ttl=3600)
 def get_filter_options():
     options = {}
@@ -185,13 +185,18 @@ def get_filter_options():
     options['transport'] = list(run_query(query_transport)['vyd_transportu'])
     query_years = f"SELECT DISTINCT EXTRACT(YEAR FROM SAFE_CAST(data_deklaracii AS DATE)) as year FROM `{TABLE_ID}` WHERE data_deklaracii IS NOT NULL ORDER BY year DESC"
     options['years'] = list(run_query(query_years)['year'].dropna().astype(int))
+    # Новый запрос для получения месяцев
+    query_months = f"SELECT DISTINCT EXTRACT(MONTH FROM SAFE_CAST(data_deklaracii AS DATE)) as month FROM `{TABLE_ID}` WHERE data_deklaracii IS NOT NULL ORDER BY month"
+    options['months'] = list(run_query(query_months)['month'].dropna().astype(int))
     return options
 
+# --- ИЗМЕНЕНИЕ 2: Добавление сброса для месяцев ---
 def reset_all_filters():
     st.session_state.selected_directions = []
     st.session_state.selected_countries = []
     st.session_state.selected_transports = []
     st.session_state.selected_years = []
+    st.session_state.selected_months = [] # <-- ДОБАВЛЕНО
     st.session_state.weight_from = 0
     st.session_state.weight_to = 0
     st.session_state.uktzed_input = ""
@@ -277,17 +282,24 @@ with st.expander("Панель Фільтрів", expanded=True):
     with col1: st.multiselect("Напрямок:", options=filter_options['direction'], key='selected_directions')
     with col2: st.multiselect("Країна-партнер:", options=filter_options['countries'], key='selected_countries')
     with col3: st.multiselect("Вид транспорту:", options=filter_options['transport'], key='selected_transports')
-    col4, col5 = st.columns([2,1])
-    with col4: st.multiselect("Роки:", options=filter_options['years'], key='selected_years')
+    
+    # --- ИЗМЕНЕНИЕ 3: Новый виджет для месяцев на панели ---
+    col4, col5, col6 = st.columns([2, 2, 1])
+    with col4: 
+        st.multiselect("Роки:", options=filter_options['years'], key='selected_years')
     with col5:
+        st.multiselect("Місяці:", options=filter_options['months'], key='selected_months') # <-- ДОБАВЛЕНО
+    with col6:
         st.write("Вага нетто, кг")
         weight_col1, weight_col2 = st.columns(2)
-        weight_from = weight_col1.number_input("Від", min_value=0, step=100, key="weight_from")
-        weight_to = weight_col2.number_input("До", min_value=0, step=100, key="weight_to")
-    col6, col7, col8 = st.columns(3)
-    with col6: st.text_input("Код УКТЗЕД (через кому):", key='uktzed_input')
-    with col7: st.text_input("Код ЄДРПОУ (через кому):", key='yedrpou_input')
-    with col8: st.text_input("Назва компанії (через кому):", key='company_input')
+        weight_col1.number_input("Від", min_value=0, step=100, key="weight_from")
+        weight_col2.number_input("До", min_value=0, step=100, key="weight_to")
+    
+    col7, col8, col9 = st.columns(3)
+    with col7: st.text_input("Код УКТЗЕД (через кому):", key='uktzed_input')
+    with col8: st.text_input("Код ЄДРПОУ (через кому):", key='yedrpou_input')
+    with col9: st.text_input("Назва компанії (через кому):", key='company_input')
+    
     search_button_filters = st.button("🔍 Знайти за фільтрами", use_container_width=True, type="primary")
 
 if search_button_filters:
@@ -305,6 +317,12 @@ if search_button_filters:
     if st.session_state.selected_years:
         query_parts.append("EXTRACT(YEAR FROM SAFE_CAST(data_deklaracii AS DATE)) IN UNNEST(@years)")
         query_params.append(ArrayQueryParameter("years", "INT64", st.session_state.selected_years))
+    
+    # --- ИЗМЕНЕНИЕ 4: Добавление логики фильтрации по месяцам ---
+    if st.session_state.selected_months:
+        query_parts.append("EXTRACT(MONTH FROM SAFE_CAST(data_deklaracii AS DATE)) IN UNNEST(@months)")
+        query_params.append(ArrayQueryParameter("months", "INT64", st.session_state.selected_months))
+
     if st.session_state.weight_from > 0:
         query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) >= @weight_from")
         query_params.append(ScalarQueryParameter("weight_from", "FLOAT64", st.session_state.weight_from))
@@ -336,9 +354,7 @@ if search_button_filters:
         st.warning("Будь ласка, оберіть хоча б один фільтр.")
     else:
         where_clause = " AND ".join(query_parts)
-        # --- ИЗМЕНЕНИЕ ЗДЕСЬ: Лимит увеличен до 5000 ---
         final_query = f"SELECT * FROM `{TABLE_ID}` WHERE {where_clause} LIMIT 5000"
-        # ---------------------------------------------
         job_config = QueryJobConfig(query_parameters=query_params)
         with st.spinner("Виконується запит..."):
             results_df = run_query(final_query, job_config=job_config)
