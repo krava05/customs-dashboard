@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 18.2
+# Версия: 18.3
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 18.2"
+APP_VERSION = "Версия 18.3"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -43,7 +43,7 @@ GROUP_DESCRIPTIONS = {
     '97': 'Твори мистецтва, предмети колекціонування'
 }
 
-# --- ФУНКЦИИ --- (без изменений)
+# --- ФУНКЦИИ ---
 
 def check_password():
     def password_entered():
@@ -175,8 +175,37 @@ initialize_clients()
 if not st.session_state.get('client_ready', False):
     st.error("❌ Не вдалося підключитися до Google BigQuery."); st.stop()
 
-# --- БЛОК AI-ПОМОЩНИКА --- (без изменений)
-# ...
+# --- ИЗМЕНЕНИЕ: Восстановлен блок AI-помощника ---
+st.header("🤖 AI-помічник по кодам УКТЗЕД")
+ai_code_description = st.text_input("Введіть опис товару для пошуку реальних кодів у вашій базі:", key="ai_code_helper_input")
+if st.button("💡 Запропонувати та перевірити коди", type="primary"):
+    if ai_code_description:
+        with st.spinner("AI підбирає коди, а ми перевіряємо їх у базі..."):
+            validated_df, found, unfound = find_and_validate_codes(ai_code_description)
+            st.session_state.validated_df = validated_df
+            st.session_state.found_ai_codes = found
+            st.session_state.unfound_ai_codes = unfound
+    else:
+        st.warning("Будь ласка, введіть опис товару.")
+
+if 'validated_df' in st.session_state:
+    validated_df = st.session_state.validated_df
+    if validated_df is not None and not validated_df.empty:
+        st.success(f"✅ Знайдено {len(validated_df)} релевантних кодів у вашій базі даних:")
+        st.dataframe(validated_df, use_container_width=True)
+        if st.session_state.found_ai_codes:
+            st.info(f"Коди знайдено за цими пропозиціями AI: `{', '.join(st.session_state.found_ai_codes)}`")
+    else:
+        st.warning("🚫 У вашій базі даних не знайдено жодного коду, що відповідає пропозиціям AI.")
+    if st.session_state.unfound_ai_codes:
+        st.caption(f"Теоретичні коди від AI, для яких не знайдено збігів: `{', '.join(st.session_state.unfound_ai_codes)}`")
+    if st.button("Очистити результат AI", type="secondary"):
+        keys_to_delete = ['validated_df', 'found_ai_codes', 'unfound_ai_codes']
+        for key in keys_to_delete:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun()
+# --- Конец восстановленного блока ---
 
 st.divider()
 
@@ -209,29 +238,19 @@ with col_position:
     position_options = []
     if selected_group_codes:
         group_conditions = " OR ".join([f"STARTS_WITH(kod_uktzed, '{g}')" for g in selected_group_codes])
-        
-        # --- ИЗМЕНЕНИЕ: Исправлен SQL-запрос ---
         query_positions = f"""
         WITH PositionCounts AS (
-            SELECT
-                SUBSTR(kod_uktzed, 1, 4) AS pos_code,
-                opis_tovaru,
-                COUNT(*) AS frequency
-            FROM `{TABLE_ID}`
-            WHERE ({group_conditions}) AND LENGTH(kod_uktzed) >= 4
+            SELECT SUBSTR(kod_uktzed, 1, 4) AS pos_code, opis_tovaru, COUNT(*) AS frequency
+            FROM `{TABLE_ID}` WHERE ({group_conditions}) AND LENGTH(kod_uktzed) >= 4
             GROUP BY pos_code, opis_tovaru
         ),
         RankedPositions AS (
-            SELECT
-                pos_code,
-                opis_tovaru,
-                ROW_NUMBER() OVER(PARTITION BY pos_code ORDER BY frequency DESC) AS rn
+            SELECT pos_code, opis_tovaru, ROW_NUMBER() OVER(PARTITION BY pos_code ORDER BY frequency DESC) AS rn
             FROM PositionCounts
         )
         SELECT pos_code, opis_tovaru AS pos_description FROM RankedPositions WHERE rn = 1 ORDER BY pos_code
         """
         position_df = run_query(query_positions)
-        
         if not position_df.empty:
             for _, row in position_df.iterrows():
                 desc = row['pos_description']
