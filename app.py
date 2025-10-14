@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 17.4
+# Версия: 18.0
 # ===============================================
 
 import os
@@ -14,39 +14,56 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 17.4"
+APP_VERSION = "Версия 18.0"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 
+# --- СЛОВАРЬ ДЛЯ ОПИСАНИЯ ГРУПП УКТЗЕД ---
+GROUP_DESCRIPTIONS = {
+    '01': 'Живі тварини', '02': 'М\'ясо та їстівні субпродукти', '03': 'Риба і ракоподібні', '04': 'Молочні продукти, яйця, мед', '05': 'Інші продукти тваринного походження',
+    '06': 'Живі дерева та інші рослини', '07': 'Овочі', '08': 'Їстівні плоди та горіхи', '09': 'Кава, чай, прянощі', '10': 'Зернові культури',
+    '11': 'Продукція борошномельно-круп\'яної промисловості', '12': 'Олійне насіння та плоди', '13': 'Шелак, камеді, смоли', '14': 'Рослинні матеріали для виготовлення плетених виробів', '15': 'Жири та олії',
+    '16': 'Готові харчові продукти з м\'яса, риби', '17': 'Цукор і кондитерські вироби', '18': 'Какао та продукти з нього', '19': 'Готові продукти із зерна', '20': 'Продукти переробки овочів, плодів, горіхів',
+    '21': 'Різні харчові продукти', '22': 'Алкогольні і безалкогольні напої та оцет', '23': 'Залишки і відходи харчової промисловості', '24': 'Тютюн', '25': 'Сіль, сірка, землі та каміння, цемент',
+    '26': 'Руди, шлак і зола', '27': 'Палива мінеральні, нафта', '28': 'Продукти неорганічної хімії', '29': 'Органічні хімічні сполуки', '30': 'Фармацевтична продукція',
+    '31': 'Добрива', '32': 'Екстракти дубильні або барвильні', '33': 'Ефірні олії та косметика', '34': 'Мило, мийні засоби, воски', '35': 'Білкові речовини, клеї, ферменти',
+    '36': 'Вибухові речовини, піротехнічні вироби', '37': 'Фото- і кінематографічні товари', '38': 'Різноманітна хімічна продукція', '39': 'Пластмаси, полімерні матеріали', '40': 'Каучук, гума та вироби з них',
+    '41': 'Необроблені шкури', '42': 'Вироби зі шкіри', '43': 'Хутро', '44': 'Деревина та вироби з неї', '45': 'Корок та вироби з нього',
+    '46': 'Вироби із соломи', '47': 'Маса з деревини', '48': 'Папір та картон', '49': 'Друкована продукція', '50': 'Шовк',
+    '51': 'Вовна, волос тварин', '52': 'Бавовна', '53': 'Інші рослинні текстильні волокна', '54': 'Нитки синтетичні або штучні', '55': 'Волокна синтетичні або штучні',
+    '56': 'Вата, повсть, фетр', '57': 'Килими', '58': 'Спеціальні тканини', '59': 'Текстильні матеріали, просочені', '60': 'Трикотажні полотна',
+    '61': 'Одяг та аксесуари, трикотажні', '62': 'Одяг та аксесуари, текстильні', '63': 'Інші готові текстильні вироби', '64': 'Взуття', '65': 'Головні убори',
+    '66': 'Парасольки, тростини', '67': 'Оброблене пір\'я та пух', '68': 'Вироби з каменю, гіпсу, цементу', '69': 'Керамічні вироби', '70': 'Скло та вироби з нього',
+    '71': 'Перли, дорогоцінне каміння, біжутерія', '72': 'Чорні метали', '73': 'Вироби з чорних металів', '74': 'Мідь і вироби з неї', '75': 'Нікель і вироби з нього',
+    '76': 'Алюміній і вироби з нього', '78': 'Свинець і вироби з нього', '79': 'Цинк і вироби з нього', '80': 'Олово і вироби з нього', '81': 'Інші недорогоцінні метали',
+    '82': 'Інструменти, ножові вироби', '83': 'Інші вироби з недорогоцінних металів', '84': 'Машини, обладнання і механічні пристрої', '85': 'Електричні машини й устаткування', '86': 'Залізничне обладнання',
+    '87': 'Транспортні засоби, крім залізничних', '88': 'Літальні апарати', '89': 'Судна, човни', '90': 'Прилади та апарати оптичні, фотографічні', '91': 'Годинники',
+    '92': 'Музичні інструменти', '93': 'Зброя та боєприпаси', '94': 'Меблі, освітлювальні прилади', '95': 'Іграшки, ігри та спортивний інвентар', '96': 'Різні промислові товари',
+    '97': 'Твори мистецтва, предмети колекціонування'
+}
+
+
 # --- ФУНКЦИИ ---
 
 def check_password():
-    """Проверяет пароль доступа к приложению."""
+    # ... (без изменений)
     def password_entered():
         if os.environ.get('K_SERVICE'):
             correct_password = os.environ.get("APP_PASSWORD")
         else:
             correct_password = st.secrets.get("APP_PASSWORD")
-        
         if st.session_state.get("password") and st.session_state["password"] == correct_password:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
-
-    if st.session_state.get("password_correct", False):
-        return True
-    
+            st.session_state["password_correct"] = True; del st.session_state["password"]
+        else: st.session_state["password_correct"] = False
+    if st.session_state.get("password_correct", False): return True
     st.text_input("Введіть пароль для доступу", type="password", on_change=password_entered, key="password")
-    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
-        st.error("😕 Пароль невірний.")
+    if "password_correct" in st.session_state and not st.session_state["password_correct"]: st.error("😕 Пароль невірний.")
     return False
 
 def initialize_clients():
-    """Инициализирует клиенты для BigQuery и Generative AI."""
-    if 'clients_initialized' in st.session_state:
-        return
+    # ... (без изменений)
+    if 'clients_initialized' in st.session_state: return
     try:
         if os.environ.get('K_SERVICE'):
             st.session_state.bq_client = bigquery.Client(project=PROJECT_ID)
@@ -54,19 +71,16 @@ def initialize_clients():
         else:
             st.session_state.bq_client = bigquery.Client()
             api_key = st.secrets.get("GOOGLE_AI_API_KEY")
-        
         if api_key:
             genai.configure(api_key=api_key)
             st.session_state.genai_ready = True
-            
         st.session_state.clients_initialized = True
         st.session_state.client_ready = True
     except Exception as e:
-        st.error(f"Помилка аутентифікації в Google: {e}")
-        st.session_state.client_ready = False
+        st.error(f"Помилка аутентифікації в Google: {e}"); st.session_state.client_ready = False
 
 def run_query(query, job_config=None):
-    """Выполняет запрос к BigQuery и возвращает DataFrame."""
+    # ... (без изменений)
     if st.session_state.get('client_ready', False):
         try:
             return st.session_state.bq_client.query(query, job_config=job_config).to_dataframe()
@@ -76,125 +90,62 @@ def run_query(query, job_config=None):
     return pd.DataFrame()
 
 def get_ai_code_suggestions(product_description):
-    """Получает от AI список теоретических кодов УКТЗЕД."""
-    if not st.session_state.get('genai_ready', False):
-        return None
-    
+    # ... (без изменений)
+    if not st.session_state.get('genai_ready', False): return None
     prompt = f"""
-    Ти експерт з митної класифікації та українських кодів УКТЗЕД.
-    Проаналізуй опис товару та надай список потенційних кодів УКТЗЕД.
-    Включи коди різної довжини (наприклад, 4, 6, 10 знаків).
-
-    Твоя відповідь МАЄ БУТИ ТІЛЬКИ у форматі JSON, що є єдиним списком рядків.
-    Приклад правильної відповіді: ["8517", "851712", "8517120000"]
-    Не додавай жодних описів, пояснень чи іншого тексту поза межами JSON-масиву.
-
+    Ти експерт з митної класифікації та українських кодів УКТЗЕД. Проаналізуй опис товару та надай список потенційних кодів УКТЗЕД.
+    Включи коди різної довжини (наприклад, 4, 6, 10 знаків). Твоя відповідь МАЄ БУТИ ТІЛЬКИ у форматі JSON, що є єдиним списком рядків.
+    Приклад правильної відповіді: ["8517", "851712", "8517120000"] Не додавай жодних описів, пояснень чи іншого тексту поза межами JSON-масиву.
     ОПИС ТОВАРУ: "{product_description}"
     """
     try:
         model = genai.GenerativeModel('models/gemini-pro-latest')
         generation_config = genai.types.GenerationConfig(response_mime_type="application/json")
         response = model.generate_content(prompt, generation_config=generation_config)
-        
         cleaned_text = response.text.strip().replace("```json", "").replace("```", "").strip()
         response_json = json.loads(cleaned_text)
-
-        if isinstance(response_json, list) and all(isinstance(i, str) for i in response_json):
-            return response_json
-        else:
-            st.error("AI повернув дані у неочікуваному форматі.")
-            return []
-            
+        if isinstance(response_json, list) and all(isinstance(i, str) for i in response_json): return response_json
+        else: st.error("AI повернув дані у неочікуваному форматі."); return []
     except Exception as e:
-        st.error(f"Помилка при отриманні кодів від AI: {e}")
-        return None
+        st.error(f"Помилка при отриманні кодів від AI: {e}"); return None
 
 def find_and_validate_codes(product_description):
-    """Получает коды от AI, проверяет их наличие и добавляет агрегированную стоимость."""
-    
+    # ... (без изменений)
     theoretical_codes = get_ai_code_suggestions(product_description)
-    
     if theoretical_codes is None or not theoretical_codes:
-        st.warning("AI не зміг запропонувати коди. Спробуйте змінити опис товару.")
-        return None, [], []
-
+        st.warning("AI не зміг запропонувати коди. Спробуйте змінити опис товару."); return None, [], []
     unique_codes = list(set(filter(None, theoretical_codes)))
     if not unique_codes:
-        st.warning("Відповідь AI не містить кодів для перевірки.")
-        return None, [], []
-
-    query_parts = []
-    query_params = []
+        st.warning("Відповідь AI не містить кодів для перевірки."); return None, [], []
+    query_parts = []; query_params = []
     for i, code in enumerate(unique_codes):
-        param_name = f"code{i}"
-        query_parts.append(f"STARTS_WITH(kod_uktzed, @{param_name})")
+        param_name = f"code{i}"; query_parts.append(f"STARTS_WITH(kod_uktzed, @{param_name})")
         query_params.append(ScalarQueryParameter(param_name, "STRING", code))
-        
     where_clause = " OR ".join(query_parts)
-    
     validation_query = f"""
-    WITH BaseData AS (
-      SELECT
-        kod_uktzed,
-        opis_tovaru,
-        SAFE_CAST(mytna_vartist_hrn AS FLOAT64) as customs_value
-      FROM `{TABLE_ID}`
-      WHERE ({where_clause}) AND kod_uktzed IS NOT NULL
-    ),
-    RankedDescriptions AS (
-      SELECT
-        kod_uktzed,
-        opis_tovaru,
-        ROW_NUMBER() OVER(PARTITION BY kod_uktzed ORDER BY COUNT(*) DESC) as rn
-      FROM BaseData
-      WHERE opis_tovaru IS NOT NULL
-      GROUP BY kod_uktzed, opis_tovaru
-    ),
-    Aggregates AS (
-      SELECT
-        kod_uktzed,
-        COUNT(*) as total_declarations,
-        SUM(customs_value) as total_value,
-        AVG(customs_value) as avg_value
-      FROM BaseData
-      GROUP BY kod_uktzed
-    )
-    SELECT
-      a.kod_uktzed AS `Код УКТЗЕД в базі`,
-      rd.opis_tovaru AS `Найчастіший опис в базі`,
-      a.total_declarations AS `Кількість декларацій`,
-      a.total_value AS `Загальна вартість грн`,
-      a.avg_value AS `Середня вартість грн`
-    FROM Aggregates a
-    JOIN RankedDescriptions rd ON a.kod_uktzed = rd.kod_uktzed
-    WHERE rd.rn = 1
-    ORDER BY a.total_declarations DESC
-    LIMIT 50
+    WITH BaseData AS (SELECT kod_uktzed, opis_tovaru, SAFE_CAST(mytna_vartist_hrn AS FLOAT64) as customs_value FROM `{TABLE_ID}` WHERE ({where_clause}) AND kod_uktzed IS NOT NULL),
+    RankedDescriptions AS (SELECT kod_uktzed, opis_tovaru, ROW_NUMBER() OVER(PARTITION BY kod_uktzed ORDER BY COUNT(*) DESC) as rn FROM BaseData WHERE opis_tovaru IS NOT NULL GROUP BY kod_uktzed, opis_tovaru),
+    Aggregates AS (SELECT kod_uktzed, COUNT(*) as total_declarations, SUM(customs_value) as total_value, AVG(customs_value) as avg_value FROM BaseData GROUP BY kod_uktzed)
+    SELECT a.kod_uktzed AS `Код УКТЗЕД в базі`, rd.opis_tovaru AS `Найчастіший опис в базі`, a.total_declarations AS `Кількість декларацій`, a.total_value AS `Загальна вартість грн`, a.avg_value AS `Середня вартість грн`
+    FROM Aggregates a JOIN RankedDescriptions rd ON a.kod_uktzed = rd.kod_uktzed WHERE rd.rn = 1 ORDER BY a.total_declarations DESC LIMIT 50
     """
-    
-    job_config = QueryJobConfig(query_parameters=query_params)
-    validated_df = run_query(validation_query, job_config=job_config)
-
+    job_config = QueryJobConfig(query_parameters=query_params); validated_df = run_query(validation_query, job_config=job_config)
     if validated_df is not None and not validated_df.empty:
         pd.options.display.float_format = '{:,.2f}'.format
         validated_df['Загальна вартість грн'] = validated_df['Загальна вартість грн'].apply(lambda x: f"{x:,.2f}" if pd.notnull(x) else "N/A")
         validated_df['Середня вартість грн'] = validated_df['Середня вартість грн'].apply(lambda x: f"{x:,.2f}" if pd.notnull(x) else "N/A")
-    
     found_prefixes = set()
     if validated_df is not None and not validated_df.empty:
         db_codes_series = validated_df["Код УКТЗЕД в базі"]
         for db_code in db_codes_series:
             for ai_code in unique_codes:
-                if str(db_code).startswith(ai_code):
-                    found_prefixes.add(ai_code)
-    
+                if str(db_code).startswith(ai_code): found_prefixes.add(ai_code)
     unfound_codes = set(unique_codes) - found_prefixes
-    
     return validated_df, list(found_prefixes), list(unfound_codes)
-
 
 @st.cache_data(ttl=3600)
 def get_filter_options():
+    # ... (без изменений, кроме добавления кода для групп)
     options = {}
     options['direction'] = ['Імпорт', 'Експорт']
     query_countries = f"SELECT DISTINCT kraina_partner FROM `{TABLE_ID}` WHERE kraina_partner IS NOT NULL ORDER BY kraina_partner"
@@ -205,14 +156,20 @@ def get_filter_options():
     options['years'] = list(run_query(query_years)['year'].dropna().astype(int))
     query_months = f"SELECT DISTINCT EXTRACT(MONTH FROM SAFE_CAST(data_deklaracii AS DATE)) as month FROM `{TABLE_ID}` WHERE data_deklaracii IS NOT NULL ORDER BY month"
     options['months'] = list(run_query(query_months)['month'].dropna().astype(int))
+    # --- ИЗМЕНЕНИЕ 1: Получаем список 2-значных групп из базы ---
+    query_groups = f"SELECT DISTINCT SUBSTR(kod_uktzed, 1, 2) as group_code FROM `{TABLE_ID}` WHERE LENGTH(kod_uktzed) >= 2 ORDER BY group_code"
+    options['groups'] = list(run_query(query_groups)['group_code'].dropna())
     return options
 
 def reset_all_filters():
+    # ... (добавлен сброс новых фильтров)
     st.session_state.selected_directions = []
     st.session_state.selected_countries = []
     st.session_state.selected_transports = []
     st.session_state.selected_years = []
     st.session_state.selected_months = []
+    st.session_state.selected_groups = []
+    st.session_state.selected_positions = []
     st.session_state.weight_from = 0
     st.session_state.weight_to = 0
     st.session_state.uktzed_input = ""
@@ -226,66 +183,42 @@ if not check_password():
 
 st.markdown("""
 <style>
-body {
-    color: #111;
-}
-.version-badge {
-    position: fixed;
-    top: 55px;
-    right: 15px;
-    padding: 5px 10px;
-    border-radius: 8px;
-    background-color: #f0f2f6;
-    color: #31333F;
-    font-size: 12px;
-    z-index: 1000;
-}
+body { color: #111; }
+.version-badge { position: fixed; top: 55px; right: 15px; padding: 5px 10px; border-radius: 8px; background-color: #f0f2f6; color: #31333F; font-size: 12px; z-index: 1000; }
 </style>
 """, unsafe_allow_html=True)
 st.markdown(f'<p class="version-badge">{APP_VERSION}</p>', unsafe_allow_html=True)
 
 st.title("Аналітика Митних Даних 📈")
-
 initialize_clients()
 if not st.session_state.get('client_ready', False):
-    st.error("❌ Не вдалося підключитися до Google BigQuery.")
-    st.stop()
+    st.error("❌ Не вдалося підключитися до Google BigQuery."); st.stop()
 
 # --- БЛОК AI-ПОМОЩНИКА ---
 st.header("🤖 AI-помічник по кодам УКТЗЕД")
 ai_code_description = st.text_input("Введіть опис товару для пошуку реальних кодів у вашій базі:", key="ai_code_helper_input")
-
 if st.button("💡 Запропонувати та перевірити коди", type="primary"):
     if ai_code_description:
         with st.spinner("AI підбирає коди, а ми перевіряємо їх у базі..."):
             validated_df, found, unfound = find_and_validate_codes(ai_code_description)
-            st.session_state.validated_df = validated_df
-            st.session_state.found_ai_codes = found
-            st.session_state.unfound_ai_codes = unfound
-    else:
-        st.warning("Будь ласка, введіть опис товару.")
+            st.session_state.validated_df = validated_df; st.session_state.found_ai_codes = found; st.session_state.unfound_ai_codes = unfound
+    else: st.warning("Будь ласка, введіть опис товару.")
 
 if 'validated_df' in st.session_state:
     validated_df = st.session_state.validated_df
-    
     if validated_df is not None and not validated_df.empty:
         st.success(f"✅ Знайдено {len(validated_df)} релевантних кодів у вашій базі даних:")
         st.dataframe(validated_df, use_container_width=True)
         if st.session_state.found_ai_codes:
             st.info(f"Коди знайдено за цими пропозиціями AI: `{', '.join(st.session_state.found_ai_codes)}`")
-    else:
-        st.warning("🚫 У вашій базі даних не знайдено жодного коду, що відповідає пропозиціям AI.")
-
+    else: st.warning("🚫 У вашій базі даних не знайдено жодного коду, що відповідає пропозиціям AI.")
     if st.session_state.unfound_ai_codes:
         st.caption(f"Теоретичні коди від AI, для яких не знайдено збігів: `{', '.join(st.session_state.unfound_ai_codes)}`")
-
     if st.button("Очистити результат AI", type="secondary"):
         keys_to_delete = ['validated_df', 'found_ai_codes', 'unfound_ai_codes']
         for key in keys_to_delete:
-            if key in keys_to_delete:
-                del st.session_state[key]
+            if key in st.session_state: del st.session_state[key]
         st.rerun()
-
 st.divider()
 
 # --- БЛОК РУЧНЫХ ФИЛЬТРОВ ---
@@ -294,23 +227,41 @@ if 'selected_directions' not in st.session_state:
     reset_all_filters()
 
 st.header("📊 Ручні фільтри")
-
-# --- ИЗМЕНЕНИЕ: Убрана сворачиваемая панель st.expander ---
 st.button("Скинути всі фільтри", on_click=reset_all_filters, use_container_width=True, type="secondary")
 st.markdown("---")
 
+# --- ИЗМЕНЕНИЕ 2: Новая структура фильтров с группами и позициями ---
 # Верхний ряд
-col1, col2, col3, col4, col5 = st.columns([2, 3, 2, 1, 1])
+col1, col2, col3 = st.columns(3)
 with col1:
     st.multiselect("Напрямок:", options=filter_options['direction'], key='selected_directions')
 with col2:
     st.multiselect("Країна-партнер:", options=filter_options['countries'], key='selected_countries')
 with col3:
     st.multiselect("Вид транспорту:", options=filter_options['transport'], key='selected_transports')
-with col4:
+
+# Ряд с датами и классификацией
+col_year, col_month, col_group, col_position = st.columns(4)
+with col_year:
     st.multiselect("Роки:", options=filter_options['years'], key='selected_years')
-with col5:
+with col_month:
     st.multiselect("Місяці:", options=filter_options['months'], key='selected_months')
+
+# Динамический фильтр по группам и позициям
+with col_group:
+    group_options = [f"{g} - {GROUP_DESCRIPTIONS.get(g, 'Невідома група')}" for g in filter_options['groups']]
+    st.multiselect("Товарна група (2 цифри):", options=group_options, key='selected_groups')
+
+with col_position:
+    selected_group_codes = [g.split(' - ')[0] for g in st.session_state.selected_groups]
+    position_options = []
+    if selected_group_codes:
+        group_conditions = " OR ".join([f"STARTS_WITH(kod_uktzed, '{g}')" for g in selected_group_codes])
+        query_positions = f"SELECT DISTINCT SUBSTR(kod_uktzed, 1, 4) as pos_code FROM `{TABLE_ID}` WHERE ({group_conditions}) AND LENGTH(kod_uktzed) >= 4 ORDER BY pos_code"
+        position_df = run_query(query_positions)
+        if not position_df.empty:
+            position_options = list(position_df['pos_code'].dropna())
+    st.multiselect("Товарна позиція (4 цифри):", options=position_options, key='selected_positions', disabled=not selected_group_codes)
 
 # Нижний ряд
 col6, col7, col8, col9 = st.columns(4)
@@ -324,51 +275,50 @@ with col8:
     st.text_input("Код ЄДРПОУ (через кому):", key='yedrpou_input')
 with col9:
     st.text_input("Назва компанії (через кому):", key='company_input')
-
+    
 search_button_filters = st.button("🔍 Знайти за фільтрами", use_container_width=True, type="primary")
 
 if search_button_filters:
     query_parts = []; query_params = []
     def process_text_input(input_str): return [item.strip() for item in input_str.split(',') if item.strip()]
     if st.session_state.selected_directions:
-        query_parts.append("napryamok IN UNNEST(@directions)")
-        query_params.append(ArrayQueryParameter("directions", "STRING", st.session_state.selected_directions))
+        query_parts.append("napryamok IN UNNEST(@directions)"); query_params.append(ArrayQueryParameter("directions", "STRING", st.session_state.selected_directions))
     if st.session_state.selected_countries:
-        query_parts.append("kraina_partner IN UNNEST(@countries)")
-        query_params.append(ArrayQueryParameter("countries", "STRING", st.session_state.selected_countries))
+        query_parts.append("kraina_partner IN UNNEST(@countries)"); query_params.append(ArrayQueryParameter("countries", "STRING", st.session_state.selected_countries))
     if st.session_state.selected_transports:
-        query_parts.append("vyd_transportu IN UNNEST(@transports)")
-        query_params.append(ArrayQueryParameter("transports", "STRING", st.session_state.selected_transports))
+        query_parts.append("vyd_transportu IN UNNEST(@transports)"); query_params.append(ArrayQueryParameter("transports", "STRING", st.session_state.selected_transports))
     if st.session_state.selected_years:
-        query_parts.append("EXTRACT(YEAR FROM SAFE_CAST(data_deklaracii AS DATE)) IN UNNEST(@years)")
-        query_params.append(ArrayQueryParameter("years", "INT64", st.session_state.selected_years))
+        query_parts.append("EXTRACT(YEAR FROM SAFE_CAST(data_deklaracii AS DATE)) IN UNNEST(@years)"); query_params.append(ArrayQueryParameter("years", "INT64", st.session_state.selected_years))
     if st.session_state.selected_months:
-        query_parts.append("EXTRACT(MONTH FROM SAFE_CAST(data_deklaracii AS DATE)) IN UNNEST(@months)")
-        query_params.append(ArrayQueryParameter("months", "INT64", st.session_state.selected_months))
+        query_parts.append("EXTRACT(MONTH FROM SAFE_CAST(data_deklaracii AS DATE)) IN UNNEST(@months)"); query_params.append(ArrayQueryParameter("months", "INT64", st.session_state.selected_months))
     if st.session_state.weight_from > 0:
-        query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) >= @weight_from")
-        query_params.append(ScalarQueryParameter("weight_from", "FLOAT64", st.session_state.weight_from))
+        query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) >= @weight_from"); query_params.append(ScalarQueryParameter("weight_from", "FLOAT64", st.session_state.weight_from))
     if st.session_state.weight_to > 0 and st.session_state.weight_to >= st.session_state.weight_from:
-        query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) <= @weight_to")
-        query_params.append(ScalarQueryParameter("weight_to", "FLOAT64", st.session_state.weight_to))
+        query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) <= @weight_to"); query_params.append(ScalarQueryParameter("weight_to", "FLOAT64", st.session_state.weight_to))
+    
+    # --- ИЗМЕНЕНИЕ 3: Новая логика для фильтрации по группам и позициям ---
+    if st.session_state.selected_positions:
+        conditions = [f"STARTS_WITH(kod_uktzed, '{p}')" for p in st.session_state.selected_positions]
+        query_parts.append(f"({' OR '.join(conditions)})")
+    elif selected_group_codes:
+        conditions = [f"STARTS_WITH(kod_uktzed, '{g}')" for g in selected_group_codes]
+        query_parts.append(f"({' OR '.join(conditions)})")
+    
     uktzed_list = process_text_input(st.session_state.uktzed_input)
     if uktzed_list:
         conditions = []
         for i, item in enumerate(uktzed_list):
-            param_name = f"uktzed{i}"
-            conditions.append(f"kod_uktzed LIKE @{param_name}")
+            param_name = f"uktzed{i}"; conditions.append(f"kod_uktzed LIKE @{param_name}")
             query_params.append(ScalarQueryParameter(param_name, "STRING", f"{item}%"))
         query_parts.append(f"({' OR '.join(conditions)})")
     yedrpou_list = process_text_input(st.session_state.yedrpou_input)
     if yedrpou_list:
-        query_parts.append("kod_yedrpou IN UNNEST(@yedrpou)")
-        query_params.append(ArrayQueryParameter("yedrpou", "STRING", yedrpou_list))
+        query_parts.append("kod_yedrpou IN UNNEST(@yedrpou)"); query_params.append(ArrayQueryParameter("yedrpou", "STRING", yedrpou_list))
     company_list = process_text_input(st.session_state.company_input)
     if company_list:
         conditions = []
         for i, item in enumerate(company_list):
-            param_name = f"company{i}"
-            conditions.append(f"UPPER(nazva_kompanii) LIKE @{param_name}")
+            param_name = f"company{i}"; conditions.append(f"UPPER(nazva_kompanii) LIKE @{param_name}")
             query_params.append(ScalarQueryParameter(param_name, "STRING", f"%{item.upper()}%"))
         query_parts.append(f"({' OR '.join(conditions)})")
     
@@ -381,20 +331,12 @@ if search_button_filters:
         with st.spinner("Виконується запит..."):
             results_df = run_query(final_query, job_config=job_config)
             st.success(f"Знайдено {len(results_df)} записів.")
-            
             if not results_df.empty:
                 ukrainian_column_names = {
-                    'data_deklaracii': 'Дата декларації',
-                    'napryamok': 'Напрямок',
-                    'nazva_kompanii': 'Назва компанії',
-                    'kod_yedrpou': 'Код ЄДРПОУ',
-                    'kraina_partner': 'Країна-партнер',
-                    'kod_uktzed': 'Код УКТЗЕД',
-                    'opis_tovaru': 'Опис товару',
-                    'mytna_vartist_hrn': 'Митна вартість, грн',
-                    'vaha_netto_kg': 'Вага нетто, кг',
+                    'data_deklaracii': 'Дата декларації', 'napryamok': 'Напрямок', 'nazva_kompanii': 'Назва компанії',
+                    'kod_yedrpou': 'Код ЄДРПОУ', 'kraina_partner': 'Країна-партнер', 'kod_uktzed': 'Код УКТЗЕД',
+                    'opis_tovaru': 'Опис товару', 'mytna_vartist_hrn': 'Митна вартість, грн', 'vaha_netto_kg': 'Вага нетто, кг',
                     'vyd_transportu': 'Вид транспорту'
                 }
                 results_df = results_df.rename(columns=ukrainian_column_names)
-            
             st.dataframe(results_df)
