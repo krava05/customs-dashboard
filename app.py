@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 17.1
+# Версия: 17.2
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 17.1"
+APP_VERSION = "Версия 17.2"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -132,7 +132,6 @@ def find_and_validate_codes(product_description):
         
     where_clause = " OR ".join(query_parts)
     
-    # --- ИЗМЕНЕНИЕ 1: Убрана запятая из названий колонок ---
     validation_query = f"""
     WITH BaseData AS (
       SELECT
@@ -176,7 +175,6 @@ def find_and_validate_codes(product_description):
     job_config = QueryJobConfig(query_parameters=query_params)
     validated_df = run_query(validation_query, job_config=job_config)
 
-    # --- ИЗМЕНЕНИЕ 2: Обновлено форматирование для колонок с новыми именами ---
     if validated_df is not None and not validated_df.empty:
         pd.options.display.float_format = '{:,.2f}'.format
         validated_df['Загальна вартість грн'] = validated_df['Загальна вартість грн'].apply(lambda x: f"{x:,.2f}" if pd.notnull(x) else "N/A")
@@ -281,7 +279,7 @@ if 'validated_df' in st.session_state:
     if st.button("Очистити результат AI", type="secondary"):
         keys_to_delete = ['validated_df', 'found_ai_codes', 'unfound_ai_codes']
         for key in keys_to_delete:
-            if key in st.session_state:
+            if key in keys_to_delete:
                 del st.session_state[key]
         st.rerun()
 
@@ -379,4 +377,21 @@ if search_button_filters:
         with st.spinner("Виконується запит..."):
             results_df = run_query(final_query, job_config=job_config)
             st.success(f"Знайдено {len(results_df)} записів.")
+            
+            # --- ИЗМЕНЕНИЕ: Переименование колонок для отображения ---
+            if not results_df.empty:
+                ukrainian_column_names = {
+                    'data_deklaracii': 'Дата декларації',
+                    'napryamok': 'Напрямок',
+                    'nazva_kompanii': 'Назва компанії',
+                    'kod_yedrpou': 'Код ЄДРПОУ',
+                    'kraina_partner': 'Країна-партнер',
+                    'kod_uktzed': 'Код УКТЗЕД',
+                    'opis_tovaru': 'Опис товару',
+                    'mytna_vartist_hrn': 'Митна вартість, грн',
+                    'vaha_netto_kg': 'Вага нетто, кг',
+                    'vyd_transportu': 'Вид транспорту'
+                }
+                results_df = results_df.rename(columns=ukrainian_column_names)
+            
             st.dataframe(results_df)
