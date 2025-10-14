@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 18.3
+# Версия: 18.4
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 18.3"
+APP_VERSION = "Версия 18.4"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -43,7 +43,7 @@ GROUP_DESCRIPTIONS = {
     '97': 'Твори мистецтва, предмети колекціонування'
 }
 
-# --- ФУНКЦИИ ---
+# --- ФУНКЦИИ --- (без изменений)
 
 def check_password():
     def password_entered():
@@ -175,7 +175,6 @@ initialize_clients()
 if not st.session_state.get('client_ready', False):
     st.error("❌ Не вдалося підключитися до Google BigQuery."); st.stop()
 
-# --- ИЗМЕНЕНИЕ: Восстановлен блок AI-помощника ---
 st.header("🤖 AI-помічник по кодам УКТЗЕД")
 ai_code_description = st.text_input("Введіть опис товару для пошуку реальних кодів у вашій базі:", key="ai_code_helper_input")
 if st.button("💡 Запропонувати та перевірити коди", type="primary"):
@@ -205,7 +204,6 @@ if 'validated_df' in st.session_state:
             if key in st.session_state:
                 del st.session_state[key]
         st.rerun()
-# --- Конец восстановленного блока ---
 
 st.divider()
 
@@ -218,13 +216,11 @@ st.header("📊 Ручні фільтри")
 st.button("Скинути всі фільтри", on_click=reset_all_filters, use_container_width=True, type="secondary")
 st.markdown("---")
 
-# Верхний ряд
 col1, col2, col3 = st.columns(3)
 with col1: st.multiselect("Напрямок:", options=filter_options['direction'], key='selected_directions')
 with col2: st.multiselect("Країна-партнер:", options=filter_options['countries'], key='selected_countries')
 with col3: st.multiselect("Вид транспорту:", options=filter_options['transport'], key='selected_transports')
 
-# Ряд с датами и классификацией
 col_year, col_month, col_group, col_position = st.columns(4)
 with col_year: st.multiselect("Роки:", options=filter_options['years'], key='selected_years')
 with col_month: st.multiselect("Місяці:", options=filter_options['months'], key='selected_months')
@@ -251,15 +247,14 @@ with col_position:
         SELECT pos_code, opis_tovaru AS pos_description FROM RankedPositions WHERE rn = 1 ORDER BY pos_code
         """
         position_df = run_query(query_positions)
+        
         if not position_df.empty:
             for _, row in position_df.iterrows():
-                desc = row['pos_description']
-                short_desc = (desc[:40] + '...') if len(desc) > 40 else desc
-                position_options.append(f"{row['pos_code']} - {short_desc}")
+                # --- ИЗМЕНЕНИЕ: Убрано ограничение на длину описания ---
+                position_options.append(f"{row['pos_code']} - {row['pos_description']}")
     
     st.multiselect("Товарна позиція (4 цифри):", options=position_options, key='selected_positions', disabled=not selected_group_codes)
 
-# Нижний ряд
 col6, col7, col8, col9 = st.columns(4)
 with col6:
     w_col1, w_col2 = st.columns(2)
