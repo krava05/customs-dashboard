@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 18.5
+# Версия: 19.0
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 18.5"
+APP_VERSION = "Версия 19.0"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -211,20 +211,36 @@ st.header("📊 Ручні фільтри")
 st.button("Скинути всі фільтри", on_click=reset_all_filters, use_container_width=True, type="secondary")
 st.markdown("---")
 
-col1, col2, col3 = st.columns(3)
-with col1: st.multiselect("Напрямок:", options=filter_options['direction'], key='selected_directions')
-with col2: st.multiselect("Країна-партнер:", options=filter_options['countries'], key='selected_countries')
-with col3: st.multiselect("Вид транспорту:", options=filter_options['transport'], key='selected_transports')
+# --- ИЗМЕНЕНИЕ: Новая компоновка фильтров ---
+# Ряд 1
+c1, c2, c3 = st.columns(3)
+with c1: st.multiselect("Напрямок:", options=filter_options['direction'], key='selected_directions')
+with c2: st.multiselect("Країна-партнер:", options=filter_options['countries'], key='selected_countries')
+with c3: st.multiselect("Вид транспорту:", options=filter_options['transport'], key='selected_transports')
 
-col_year, col_month, col_group, col_position = st.columns(4)
-with col_year: st.multiselect("Роки:", options=filter_options['years'], key='selected_years')
-with col_month: st.multiselect("Місяці:", options=filter_options['months'], key='selected_months')
+# Ряд 2
+c4, c5, c6 = st.columns(3)
+with c4: st.multiselect("Роки:", options=filter_options['years'], key='selected_years')
+with c5: st.multiselect("Місяці:", options=filter_options['months'], key='selected_months')
+with c6:
+    w_col1, w_col2 = st.columns(2)
+    w_col1.number_input("Вага від, кг", min_value=0, step=100, key="weight_from")
+    w_col2.number_input("Вага до, кг", min_value=0, step=100, key="weight_to")
 
-with col_group:
+# Ряд 3
+c7, c8, c9 = st.columns(3)
+with c7: st.text_input("Код УКТЗЕД (через кому):", key='uktzed_input')
+with c8: st.text_input("Код ЄДРПОУ (через кому):", key='yedrpou_input')
+with c9: st.text_input("Назва компанії (через кому):", key='company_input')
+
+# Ряд 4 (для иерархии кодов)
+st.markdown("---") # Визуальный разделитель
+cg, cp = st.columns([1, 3])
+with cg:
     group_options = [f"{g} - {GROUP_DESCRIPTIONS.get(g, 'Невідома група')}" for g in filter_options['groups']]
     st.multiselect("Товарна група (2 цифри):", options=group_options, key='selected_groups')
 
-with col_position:
+with cp:
     selected_group_codes = [g.split(' - ')[0] for g in st.session_state.get('selected_groups', [])]
     position_options = []
     if selected_group_codes:
@@ -245,18 +261,9 @@ with col_position:
         if not position_df.empty:
             for _, row in position_df.iterrows():
                 position_options.append(f"{row['pos_code']} - {row['pos_description']}")
-    
     st.multiselect("Товарна позиція (4 цифри):", options=position_options, key='selected_positions', disabled=not selected_group_codes)
-
-col6, col7, col8, col9 = st.columns(4)
-with col6:
-    w_col1, w_col2 = st.columns(2)
-    w_col1.number_input("Вага від, кг", min_value=0, step=100, key="weight_from")
-    w_col2.number_input("Вага до, кг", min_value=0, step=100, key="weight_to")
-with col7: st.text_input("Код УКТЗЕД (через кому):", key='uktzed_input')
-with col8: st.text_input("Код ЄДРПОУ (через кому):", key='yedrpou_input')
-with col9: st.text_input("Назва компанії (через кому):", key='company_input')
     
+st.markdown("---")
 search_button_filters = st.button("🔍 Знайти за фільтрами", use_container_width=True, type="primary")
 
 if search_button_filters:
@@ -323,7 +330,6 @@ if search_button_filters:
                 }
                 results_df = results_df.rename(columns=ukrainian_column_names)
                 
-                # --- ИЗМЕНЕНИЕ: Преобразование в числовой тип для корректной сортировки ---
                 numeric_cols = ['Митна вартість, грн', 'Вага нетто, кг']
                 for col in numeric_cols:
                     if col in results_df.columns:
