@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 16.2
+# Версия: 17.0
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 16.2"
+APP_VERSION = "Версия 17.0"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -110,7 +110,7 @@ def get_ai_code_suggestions(product_description):
         return None
 
 def find_and_validate_codes(product_description):
-    """Получает коды от AI и проверяет их наличие в базе данных BigQuery."""
+    """Получает коды от AI, проверяет их наличие и добавляет агрегированную стоимость."""
     
     theoretical_codes = get_ai_code_suggestions(product_description)
     
@@ -132,38 +132,58 @@ def find_and_validate_codes(product_description):
         
     where_clause = " OR ".join(query_parts)
     
+    # --- ИЗМЕНЕНИЕ: SQL-запрос для добавления общей и средней стоимости ---
     validation_query = f"""
-    WITH RankedDescriptions AS (
+    WITH BaseData AS (
       SELECT
         kod_uktzed,
         opis_tovaru,
-        COUNT(*) AS cnt,
-        ROW_NUMBER() OVER(PARTITION BY kod_uktzed ORDER BY COUNT(*) DESC) as rn
+        SAFE_CAST(mytna_vartist_hrn AS FLOAT64) as customs_value
       FROM `{TABLE_ID}`
       WHERE ({where_clause}) AND kod_uktzed IS NOT NULL
+    ),
+    RankedDescriptions AS (
+      SELECT
+        kod_uktzed,
+        opis_tovaru,
+        ROW_NUMBER() OVER(PARTITION BY kod_uktzed ORDER BY COUNT(*) DESC) as rn
+      FROM BaseData
+      WHERE opis_tovaru IS NOT NULL
       GROUP BY kod_uktzed, opis_tovaru
     ),
-    TotalCounts AS (
-      SELECT kod_uktzed, SUM(cnt) as total_declarations
-      FROM RankedDescriptions
+    Aggregates AS (
+      SELECT
+        kod_uktzed,
+        COUNT(*) as total_declarations,
+        SUM(customs_value) as total_value,
+        AVG(customs_value) as avg_value
+      FROM BaseData
       GROUP BY kod_uktzed
     )
     SELECT
-      rd.kod_uktzed AS `Код УКТЗЕД в базі`,
+      a.kod_uktzed AS `Код УКТЗЕД в базі`,
       rd.opis_tovaru AS `Найчастіший опис в базі`,
-      tc.total_declarations AS `Кількість декларацій`
-    FROM RankedDescriptions rd
-    JOIN TotalCounts tc ON rd.kod_uktzed = tc.kod_uktzed
+      a.total_declarations AS `Кількість декларацій`,
+      a.total_value AS `Загальна вартість, грн`,
+      a.avg_value AS `Середня вартість, грн`
+    FROM Aggregates a
+    JOIN RankedDescriptions rd ON a.kod_uktzed = rd.kod_uktzed
     WHERE rd.rn = 1
-    ORDER BY tc.total_declarations DESC
+    ORDER BY a.total_declarations DESC
     LIMIT 50
     """
     
     job_config = QueryJobConfig(query_parameters=query_params)
     validated_df = run_query(validation_query, job_config=job_config)
+
+    # --- ИЗМЕНЕНИЕ: Форматирование числовых колонок для красивого отображения ---
+    if validated_df is not None and not validated_df.empty:
+        pd.options.display.float_format = '{:,.2f}'.format
+        validated_df['Загальна вартість, грн'] = validated_df['Загальна вартість, грн'].apply(lambda x: f"{x:,.2f}" if pd.notnull(x) else "N/A")
+        validated_df['Середня вартість, грн'] = validated_df['Середня вартість, грн'].apply(lambda x: f"{x:,.2f}" if pd.notnull(x) else "N/A")
     
     found_prefixes = set()
-    if not validated_df.empty:
+    if validated_df is not None and not validated_df.empty:
         db_codes_series = validated_df["Код УКТЗЕД в базі"]
         for db_code in db_codes_series:
             for ai_code in unique_codes:
@@ -290,11 +310,9 @@ with st.expander("Панель Фільтрів", expanded=True):
     with col5:
         st.multiselect("Місяці:", options=filter_options['months'], key='selected_months')
 
-    # --- ИЗМЕНЕНИЕ: Выравнивание нижнего ряда фильтров ---
     # Нижний ряд
     col6, col7, col8, col9 = st.columns(4)
     with col6:
-        # Для лучшего выравнивания используем два отдельных виджета с видимыми заголовками
         w_col1, w_col2 = st.columns(2)
         w_col1.number_input("Вага від, кг", min_value=0, step=100, key="weight_from")
         w_col2.number_input("Вага до, кг", min_value=0, step=100, key="weight_to")
