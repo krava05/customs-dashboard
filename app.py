@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 20.0
+# Версия: 20.1
 # ===============================================
 
 import os
@@ -15,7 +15,7 @@ import re
 from io import BytesIO
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 20.0"
+APP_VERSION = "Версия 20.1"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -44,7 +44,6 @@ GROUP_DESCRIPTIONS = {
     '97': 'Твори мистецтва, предмети колекціонування'
 }
 
-# --- ИЗМЕНЕНИЕ 1: Новая функция для конвертации DataFrame в Excel ---
 @st.cache_data
 def to_excel(df):
     output = BytesIO()
@@ -166,6 +165,9 @@ def reset_all_filters():
     st.session_state.selected_years = []; st.session_state.selected_months = []; st.session_state.selected_groups = []
     st.session_state.selected_positions = []; st.session_state.weight_from = 0; st.session_state.weight_to = 0
     st.session_state.uktzed_input = ""; st.session_state.yedrpou_input = ""; st.session_state.company_input = ""
+    # --- ИЗМЕНЕНИЕ 3: Очистка результатов поиска при сбросе фильтров ---
+    if 'results_df' in st.session_state:
+        del st.session_state.results_df
 
 # --- ОСНОВНОЙ ИНТЕРФЕЙС ПРИЛОЖЕНИЯ ---
 
@@ -269,7 +271,8 @@ with cp:
 st.markdown("---")
 search_button_filters = st.button("🔍 Знайти за фільтрами", use_container_width=True, type="primary")
 
-# --- ЛОГИКА ПОИСКА И ОТОБРАЖЕНИЯ ---
+# --- ИЗМЕНЕНИЕ 4: Логика вынесена из-под кнопки в отдельный блок ---
+# Сначала обрабатываем нажатие кнопки и сохраняем результат в сессию
 if search_button_filters:
     query_parts = []; query_params = []
     def process_text_input(input_str): return [item.strip() for item in input_str.split(',') if item.strip()]
@@ -317,6 +320,7 @@ if search_button_filters:
     
     if not query_parts:
         st.warning("Будь ласка, оберіть хоча б один фільтр.")
+        st.session_state.results_df = pd.DataFrame() # Очищаем результаты, если фильтров нет
     else:
         where_clause = " AND ".join(query_parts)
         final_query = f"SELECT * FROM `{TABLE_ID}` WHERE {where_clause} LIMIT 5000"
@@ -324,6 +328,7 @@ if search_button_filters:
         with st.spinner("Виконується запит..."):
             st.session_state.results_df = run_query(final_query, job_config=job_config)
 
+# Отображаем результаты, если они есть в сессии
 if 'results_df' in st.session_state and st.session_state.results_df is not None:
     results_df = st.session_state.results_df.copy()
     st.success(f"Знайдено {len(results_df)} записів.")
@@ -344,7 +349,6 @@ if 'results_df' in st.session_state and st.session_state.results_df is not None:
         
         st.dataframe(results_df)
 
-        # --- ИЗМЕНЕНИЕ 2: Добавлена кнопка скачивания ---
         excel_data = to_excel(results_df)
         st.download_button(
             label="📥 Завантажити в форматі Excel",
