@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 18.1
+# Версия: 18.2
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 18.1"
+APP_VERSION = "Версия 18.2"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -205,26 +205,33 @@ with col_group:
     st.multiselect("Товарна група (2 цифри):", options=group_options, key='selected_groups')
 
 with col_position:
-    selected_group_codes = [g.split(' - ')[0] for g in st.session_state.selected_groups]
+    selected_group_codes = [g.split(' - ')[0] for g in st.session_state.get('selected_groups', [])]
     position_options = []
     if selected_group_codes:
-        # --- ИЗМЕНЕНИЕ 1: Новый SQL-запрос для получения кодов и их описаний ---
         group_conditions = " OR ".join([f"STARTS_WITH(kod_uktzed, '{g}')" for g in selected_group_codes])
+        
+        # --- ИЗМЕНЕНИЕ: Исправлен SQL-запрос ---
         query_positions = f"""
-        WITH PositionDescriptions AS (
+        WITH PositionCounts AS (
             SELECT
-                SUBSTR(kod_uktzed, 1, 4) as pos_code,
+                SUBSTR(kod_uktzed, 1, 4) AS pos_code,
                 opis_tovaru,
-                ROW_NUMBER() OVER(PARTITION BY SUBSTR(kod_uktzed, 1, 4) ORDER BY COUNT(*) DESC) as rn
+                COUNT(*) AS frequency
             FROM `{TABLE_ID}`
             WHERE ({group_conditions}) AND LENGTH(kod_uktzed) >= 4
             GROUP BY pos_code, opis_tovaru
+        ),
+        RankedPositions AS (
+            SELECT
+                pos_code,
+                opis_tovaru,
+                ROW_NUMBER() OVER(PARTITION BY pos_code ORDER BY frequency DESC) AS rn
+            FROM PositionCounts
         )
-        SELECT pos_code, opis_tovaru as pos_description FROM PositionDescriptions WHERE rn = 1 ORDER BY pos_code
+        SELECT pos_code, opis_tovaru AS pos_description FROM RankedPositions WHERE rn = 1 ORDER BY pos_code
         """
         position_df = run_query(query_positions)
         
-        # --- ИЗМЕНЕНИЕ 2: Форматирование опций с кодом и описанием ---
         if not position_df.empty:
             for _, row in position_df.iterrows():
                 desc = row['pos_description']
@@ -263,8 +270,9 @@ if search_button_filters:
     if st.session_state.weight_to > 0 and st.session_state.weight_to >= st.session_state.weight_from:
         query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) <= @weight_to"); query_params.append(ScalarQueryParameter("weight_to", "FLOAT64", st.session_state.weight_to))
     
-    # --- ИЗМЕНЕНИЕ 3: Обновлена логика для извлечения кодов из выбранных позиций ---
-    if st.session_state.selected_positions:
+    selected_group_codes = [g.split(' - ')[0] for g in st.session_state.get('selected_groups', [])]
+    
+    if st.session_state.get('selected_positions', []):
         position_codes = [p.split(' - ')[0] for p in st.session_state.selected_positions]
         conditions = [f"STARTS_WITH(kod_uktzed, '{p}')" for p in position_codes]
         query_parts.append(f"({' OR '.join(conditions)})")
