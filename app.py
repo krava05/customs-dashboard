@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 17.3
+# Версия: 17.4
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 17.3"
+APP_VERSION = "Версия 17.4"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -224,7 +224,6 @@ def reset_all_filters():
 if not check_password():
     st.stop()
 
-# --- ИЗМЕНЕНИЕ: Добавлен стиль для затемнения шрифта ---
 st.markdown("""
 <style>
 body {
@@ -295,37 +294,38 @@ if 'selected_directions' not in st.session_state:
     reset_all_filters()
 
 st.header("📊 Ручні фільтри")
-with st.expander("Панель Фільтрів", expanded=True):
-    st.button("Скинути всі фільтри", on_click=reset_all_filters, use_container_width=True, type="secondary")
-    st.markdown("---")
-    
-    # Верхний ряд
-    col1, col2, col3, col4, col5 = st.columns([2, 3, 2, 1, 1])
-    with col1:
-        st.multiselect("Напрямок:", options=filter_options['direction'], key='selected_directions')
-    with col2:
-        st.multiselect("Країна-партнер:", options=filter_options['countries'], key='selected_countries')
-    with col3:
-        st.multiselect("Вид транспорту:", options=filter_options['transport'], key='selected_transports')
-    with col4:
-        st.multiselect("Роки:", options=filter_options['years'], key='selected_years')
-    with col5:
-        st.multiselect("Місяці:", options=filter_options['months'], key='selected_months')
 
-    # Нижний ряд
-    col6, col7, col8, col9 = st.columns(4)
-    with col6:
-        w_col1, w_col2 = st.columns(2)
-        w_col1.number_input("Вага від, кг", min_value=0, step=100, key="weight_from")
-        w_col2.number_input("Вага до, кг", min_value=0, step=100, key="weight_to")
-    with col7:
-        st.text_input("Код УКТЗЕД (через кому):", key='uktzed_input')
-    with col8:
-        st.text_input("Код ЄДРПОУ (через кому):", key='yedrpou_input')
-    with col9:
-        st.text_input("Назва компанії (через кому):", key='company_input')
-    
-    search_button_filters = st.button("🔍 Знайти за фільтрами", use_container_width=True, type="primary")
+# --- ИЗМЕНЕНИЕ: Убрана сворачиваемая панель st.expander ---
+st.button("Скинути всі фільтри", on_click=reset_all_filters, use_container_width=True, type="secondary")
+st.markdown("---")
+
+# Верхний ряд
+col1, col2, col3, col4, col5 = st.columns([2, 3, 2, 1, 1])
+with col1:
+    st.multiselect("Напрямок:", options=filter_options['direction'], key='selected_directions')
+with col2:
+    st.multiselect("Країна-партнер:", options=filter_options['countries'], key='selected_countries')
+with col3:
+    st.multiselect("Вид транспорту:", options=filter_options['transport'], key='selected_transports')
+with col4:
+    st.multiselect("Роки:", options=filter_options['years'], key='selected_years')
+with col5:
+    st.multiselect("Місяці:", options=filter_options['months'], key='selected_months')
+
+# Нижний ряд
+col6, col7, col8, col9 = st.columns(4)
+with col6:
+    w_col1, w_col2 = st.columns(2)
+    w_col1.number_input("Вага від, кг", min_value=0, step=100, key="weight_from")
+    w_col2.number_input("Вага до, кг", min_value=0, step=100, key="weight_to")
+with col7:
+    st.text_input("Код УКТЗЕД (через кому):", key='uktzed_input')
+with col8:
+    st.text_input("Код ЄДРПОУ (через кому):", key='yedrpou_input')
+with col9:
+    st.text_input("Назва компанії (через кому):", key='company_input')
+
+search_button_filters = st.button("🔍 Знайти за фільтрами", use_container_width=True, type="primary")
 
 if search_button_filters:
     query_parts = []; query_params = []
