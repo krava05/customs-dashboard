@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 17.2
+# Версия: 17.3
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 17.2"
+APP_VERSION = "Версия 17.3"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -224,8 +224,12 @@ def reset_all_filters():
 if not check_password():
     st.stop()
 
+# --- ИЗМЕНЕНИЕ: Добавлен стиль для затемнения шрифта ---
 st.markdown("""
 <style>
+body {
+    color: #111;
+}
 .version-badge {
     position: fixed;
     top: 55px;
@@ -378,7 +382,6 @@ if search_button_filters:
             results_df = run_query(final_query, job_config=job_config)
             st.success(f"Знайдено {len(results_df)} записів.")
             
-            # --- ИЗМЕНЕНИЕ: Переименование колонок для отображения ---
             if not results_df.empty:
                 ukrainian_column_names = {
                     'data_deklaracii': 'Дата декларації',
