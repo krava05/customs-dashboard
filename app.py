@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 17.0
+# Версия: 17.1
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 17.0"
+APP_VERSION = "Версия 17.1"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -132,7 +132,7 @@ def find_and_validate_codes(product_description):
         
     where_clause = " OR ".join(query_parts)
     
-    # --- ИЗМЕНЕНИЕ: SQL-запрос для добавления общей и средней стоимости ---
+    # --- ИЗМЕНЕНИЕ 1: Убрана запятая из названий колонок ---
     validation_query = f"""
     WITH BaseData AS (
       SELECT
@@ -164,8 +164,8 @@ def find_and_validate_codes(product_description):
       a.kod_uktzed AS `Код УКТЗЕД в базі`,
       rd.opis_tovaru AS `Найчастіший опис в базі`,
       a.total_declarations AS `Кількість декларацій`,
-      a.total_value AS `Загальна вартість, грн`,
-      a.avg_value AS `Середня вартість, грн`
+      a.total_value AS `Загальна вартість грн`,
+      a.avg_value AS `Середня вартість грн`
     FROM Aggregates a
     JOIN RankedDescriptions rd ON a.kod_uktzed = rd.kod_uktzed
     WHERE rd.rn = 1
@@ -176,11 +176,11 @@ def find_and_validate_codes(product_description):
     job_config = QueryJobConfig(query_parameters=query_params)
     validated_df = run_query(validation_query, job_config=job_config)
 
-    # --- ИЗМЕНЕНИЕ: Форматирование числовых колонок для красивого отображения ---
+    # --- ИЗМЕНЕНИЕ 2: Обновлено форматирование для колонок с новыми именами ---
     if validated_df is not None and not validated_df.empty:
         pd.options.display.float_format = '{:,.2f}'.format
-        validated_df['Загальна вартість, грн'] = validated_df['Загальна вартість, грн'].apply(lambda x: f"{x:,.2f}" if pd.notnull(x) else "N/A")
-        validated_df['Середня вартість, грн'] = validated_df['Середня вартість, грн'].apply(lambda x: f"{x:,.2f}" if pd.notnull(x) else "N/A")
+        validated_df['Загальна вартість грн'] = validated_df['Загальна вартість грн'].apply(lambda x: f"{x:,.2f}" if pd.notnull(x) else "N/A")
+        validated_df['Середня вартість грн'] = validated_df['Середня вартість грн'].apply(lambda x: f"{x:,.2f}" if pd.notnull(x) else "N/A")
     
     found_prefixes = set()
     if validated_df is not None and not validated_df.empty:
