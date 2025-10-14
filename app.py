@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 19.0
+# Версия: 20.0
 # ===============================================
 
 import os
@@ -12,9 +12,10 @@ import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import json
 import re
+from io import BytesIO
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 19.0"
+APP_VERSION = "Версия 20.0"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -42,6 +43,15 @@ GROUP_DESCRIPTIONS = {
     '92': 'Музичні інструменти', '93': 'Зброя та боєприпаси', '94': 'Меблі, освітлювальні прилади', '95': 'Іграшки, ігри та спортивний інвентар', '96': 'Різні промислові товари',
     '97': 'Твори мистецтва, предмети колекціонування'
 }
+
+# --- ИЗМЕНЕНИЕ 1: Новая функция для конвертации DataFrame в Excel ---
+@st.cache_data
+def to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Data')
+    processed_data = output.getvalue()
+    return processed_data
 
 # --- ФУНКЦИИ --- (без изменений)
 
@@ -211,14 +221,11 @@ st.header("📊 Ручні фільтри")
 st.button("Скинути всі фільтри", on_click=reset_all_filters, use_container_width=True, type="secondary")
 st.markdown("---")
 
-# --- ИЗМЕНЕНИЕ: Новая компоновка фильтров ---
-# Ряд 1
 c1, c2, c3 = st.columns(3)
 with c1: st.multiselect("Напрямок:", options=filter_options['direction'], key='selected_directions')
 with c2: st.multiselect("Країна-партнер:", options=filter_options['countries'], key='selected_countries')
 with c3: st.multiselect("Вид транспорту:", options=filter_options['transport'], key='selected_transports')
 
-# Ряд 2
 c4, c5, c6 = st.columns(3)
 with c4: st.multiselect("Роки:", options=filter_options['years'], key='selected_years')
 with c5: st.multiselect("Місяці:", options=filter_options['months'], key='selected_months')
@@ -227,19 +234,16 @@ with c6:
     w_col1.number_input("Вага від, кг", min_value=0, step=100, key="weight_from")
     w_col2.number_input("Вага до, кг", min_value=0, step=100, key="weight_to")
 
-# Ряд 3
 c7, c8, c9 = st.columns(3)
 with c7: st.text_input("Код УКТЗЕД (через кому):", key='uktzed_input')
 with c8: st.text_input("Код ЄДРПОУ (через кому):", key='yedrpou_input')
 with c9: st.text_input("Назва компанії (через кому):", key='company_input')
 
-# Ряд 4 (для иерархии кодов)
-st.markdown("---") # Визуальный разделитель
+st.markdown("---")
 cg, cp = st.columns([1, 3])
 with cg:
     group_options = [f"{g} - {GROUP_DESCRIPTIONS.get(g, 'Невідома група')}" for g in filter_options['groups']]
     st.multiselect("Товарна група (2 цифри):", options=group_options, key='selected_groups')
-
 with cp:
     selected_group_codes = [g.split(' - ')[0] for g in st.session_state.get('selected_groups', [])]
     position_options = []
@@ -248,8 +252,7 @@ with cp:
         query_positions = f"""
         WITH PositionCounts AS (
             SELECT SUBSTR(kod_uktzed, 1, 4) AS pos_code, opis_tovaru, COUNT(*) AS frequency
-            FROM `{TABLE_ID}` WHERE ({group_conditions}) AND LENGTH(kod_uktzed) >= 4
-            GROUP BY pos_code, opis_tovaru
+            FROM `{TABLE_ID}` WHERE ({group_conditions}) AND LENGTH(kod_uktzed) >= 4 GROUP BY pos_code, opis_tovaru
         ),
         RankedPositions AS (
             SELECT pos_code, opis_tovaru, ROW_NUMBER() OVER(PARTITION BY pos_code ORDER BY frequency DESC) AS rn
@@ -262,10 +265,11 @@ with cp:
             for _, row in position_df.iterrows():
                 position_options.append(f"{row['pos_code']} - {row['pos_description']}")
     st.multiselect("Товарна позиція (4 цифри):", options=position_options, key='selected_positions', disabled=not selected_group_codes)
-    
+
 st.markdown("---")
 search_button_filters = st.button("🔍 Знайти за фільтрами", use_container_width=True, type="primary")
 
+# --- ЛОГИКА ПОИСКА И ОТОБРАЖЕНИЯ ---
 if search_button_filters:
     query_parts = []; query_params = []
     def process_text_input(input_str): return [item.strip() for item in input_str.split(',') if item.strip()]
@@ -285,7 +289,6 @@ if search_button_filters:
         query_parts.append("SAFE_CAST(vaha_netto_kg AS FLOAT64) <= @weight_to"); query_params.append(ScalarQueryParameter("weight_to", "FLOAT64", st.session_state.weight_to))
     
     selected_group_codes = [g.split(' - ')[0] for g in st.session_state.get('selected_groups', [])]
-    
     if st.session_state.get('selected_positions', []):
         position_codes = [p.split(' - ')[0] for p in st.session_state.selected_positions]
         conditions = [f"STARTS_WITH(kod_uktzed, '{p}')" for p in position_codes]
@@ -319,20 +322,33 @@ if search_button_filters:
         final_query = f"SELECT * FROM `{TABLE_ID}` WHERE {where_clause} LIMIT 5000"
         job_config = QueryJobConfig(query_parameters=query_params)
         with st.spinner("Виконується запит..."):
-            results_df = run_query(final_query, job_config=job_config)
-            st.success(f"Знайдено {len(results_df)} записів.")
-            if not results_df.empty:
-                ukrainian_column_names = {
-                    'data_deklaracii': 'Дата декларації', 'napryamok': 'Напрямок', 'nazva_kompanii': 'Назва компанії',
-                    'kod_yedrpou': 'Код ЄДРПОУ', 'kraina_partner': 'Країна-партнер', 'kod_uktzed': 'Код УКТЗЕД',
-                    'opis_tovaru': 'Опис товару', 'mytna_vartist_hrn': 'Митна вартість, грн', 'vaha_netto_kg': 'Вага нетто, кг',
-                    'vyd_transportu': 'Вид транспорту'
-                }
-                results_df = results_df.rename(columns=ukrainian_column_names)
-                
-                numeric_cols = ['Митна вартість, грн', 'Вага нетто, кг']
-                for col in numeric_cols:
-                    if col in results_df.columns:
-                        results_df[col] = pd.to_numeric(results_df[col], errors='coerce')
-                
-            st.dataframe(results_df)
+            st.session_state.results_df = run_query(final_query, job_config=job_config)
+
+if 'results_df' in st.session_state and st.session_state.results_df is not None:
+    results_df = st.session_state.results_df.copy()
+    st.success(f"Знайдено {len(results_df)} записів.")
+    
+    if not results_df.empty:
+        ukrainian_column_names = {
+            'data_deklaracii': 'Дата декларації', 'napryamok': 'Напрямок', 'nazva_kompanii': 'Назва компанії',
+            'kod_yedrpou': 'Код ЄДРПОУ', 'kraina_partner': 'Країна-партнер', 'kod_uktzed': 'Код УКТЗЕД',
+            'opis_tovaru': 'Опис товару', 'mytna_vartist_hrn': 'Митна вартість, грн', 'vaha_netto_kg': 'Вага нетто, кг',
+            'vyd_transportu': 'Вид транспорту'
+        }
+        results_df = results_df.rename(columns=ukrainian_column_names)
+        
+        numeric_cols = ['Митна вартість, грн', 'Вага нетто, кг']
+        for col in numeric_cols:
+            if col in results_df.columns:
+                results_df[col] = pd.to_numeric(results_df[col], errors='coerce')
+        
+        st.dataframe(results_df)
+
+        # --- ИЗМЕНЕНИЕ 2: Добавлена кнопка скачивания ---
+        excel_data = to_excel(results_df)
+        st.download_button(
+            label="📥 Завантажити в форматі Excel",
+            data=excel_data,
+            file_name='customs_data_export.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
