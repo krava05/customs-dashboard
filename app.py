@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 18.4
+# Версия: 18.5
 # ===============================================
 
 import os
@@ -14,7 +14,7 @@ import json
 import re
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 18.4"
+APP_VERSION = "Версия 18.5"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
@@ -181,11 +181,8 @@ if st.button("💡 Запропонувати та перевірити коди
     if ai_code_description:
         with st.spinner("AI підбирає коди, а ми перевіряємо їх у базі..."):
             validated_df, found, unfound = find_and_validate_codes(ai_code_description)
-            st.session_state.validated_df = validated_df
-            st.session_state.found_ai_codes = found
-            st.session_state.unfound_ai_codes = unfound
-    else:
-        st.warning("Будь ласка, введіть опис товару.")
+            st.session_state.validated_df = validated_df; st.session_state.found_ai_codes = found; st.session_state.unfound_ai_codes = unfound
+    else: st.warning("Будь ласка, введіть опис товару.")
 
 if 'validated_df' in st.session_state:
     validated_df = st.session_state.validated_df
@@ -194,15 +191,13 @@ if 'validated_df' in st.session_state:
         st.dataframe(validated_df, use_container_width=True)
         if st.session_state.found_ai_codes:
             st.info(f"Коди знайдено за цими пропозиціями AI: `{', '.join(st.session_state.found_ai_codes)}`")
-    else:
-        st.warning("🚫 У вашій базі даних не знайдено жодного коду, що відповідає пропозиціям AI.")
+    else: st.warning("🚫 У вашій базі даних не знайдено жодного коду, що відповідає пропозиціям AI.")
     if st.session_state.unfound_ai_codes:
         st.caption(f"Теоретичні коди від AI, для яких не знайдено збігів: `{', '.join(st.session_state.unfound_ai_codes)}`")
     if st.button("Очистити результат AI", type="secondary"):
         keys_to_delete = ['validated_df', 'found_ai_codes', 'unfound_ai_codes']
         for key in keys_to_delete:
-            if key in st.session_state:
-                del st.session_state[key]
+            if key in st.session_state: del st.session_state[key]
         st.rerun()
 
 st.divider()
@@ -247,10 +242,8 @@ with col_position:
         SELECT pos_code, opis_tovaru AS pos_description FROM RankedPositions WHERE rn = 1 ORDER BY pos_code
         """
         position_df = run_query(query_positions)
-        
         if not position_df.empty:
             for _, row in position_df.iterrows():
-                # --- ИЗМЕНЕНИЕ: Убрано ограничение на длину описания ---
                 position_options.append(f"{row['pos_code']} - {row['pos_description']}")
     
     st.multiselect("Товарна позиція (4 цифри):", options=position_options, key='selected_positions', disabled=not selected_group_codes)
@@ -329,4 +322,11 @@ if search_button_filters:
                     'vyd_transportu': 'Вид транспорту'
                 }
                 results_df = results_df.rename(columns=ukrainian_column_names)
+                
+                # --- ИЗМЕНЕНИЕ: Преобразование в числовой тип для корректной сортировки ---
+                numeric_cols = ['Митна вартість, грн', 'Вага нетто, кг']
+                for col in numeric_cols:
+                    if col in results_df.columns:
+                        results_df[col] = pd.to_numeric(results_df[col], errors='coerce')
+                
             st.dataframe(results_df)
