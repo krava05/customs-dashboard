@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 20.1
+# Версия: 21.1
 # ===============================================
 
 import os
@@ -15,13 +15,14 @@ import re
 from io import BytesIO
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 20.1"
+APP_VERSION = "Версия 21.1"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 
 # --- СЛОВАРЬ ДЛЯ ОПИСАНИЯ ГРУПП УКТЗЕД ---
 GROUP_DESCRIPTIONS = {
+    # ... (dictionary remains the same) ...
     '01': 'Живі тварини', '02': 'М\'ясо та їстівні субпродукти', '03': 'Риба і ракоподібні', '04': 'Молочні продукти, яйця, мед', '05': 'Інші продукти тваринного походження',
     '06': 'Живі дерева та інші рослини', '07': 'Овочі', '08': 'Їстівні плоди та горіхи', '09': 'Кава, чай, прянощі', '10': 'Зернові культури',
     '11': 'Продукція борошномельно-круп\'яної промисловості', '12': 'Олійне насіння та плоди', '13': 'Шелак, камеді, смоли', '14': 'Рослинні матеріали для виготовлення плетених виробів', '15': 'Жири та олії',
@@ -165,9 +166,8 @@ def reset_all_filters():
     st.session_state.selected_years = []; st.session_state.selected_months = []; st.session_state.selected_groups = []
     st.session_state.selected_positions = []; st.session_state.weight_from = 0; st.session_state.weight_to = 0
     st.session_state.uktzed_input = ""; st.session_state.yedrpou_input = ""; st.session_state.company_input = ""
-    # --- ИЗМЕНЕНИЕ 3: Очистка результатов поиска при сбросе фильтров ---
-    if 'results_df' in st.session_state:
-        del st.session_state.results_df
+    if 'results_df' in st.session_state: del st.session_state.results_df
+    st.session_state.show_unique_companies = False
 
 # --- ОСНОВНОЙ ИНТЕРФЕЙС ПРИЛОЖЕНИЯ ---
 
@@ -271,8 +271,6 @@ with cp:
 st.markdown("---")
 search_button_filters = st.button("🔍 Знайти за фільтрами", use_container_width=True, type="primary")
 
-# --- ИЗМЕНЕНИЕ 4: Логика вынесена из-под кнопки в отдельный блок ---
-# Сначала обрабатываем нажатие кнопки и сохраняем результат в сессию
 if search_button_filters:
     query_parts = []; query_params = []
     def process_text_input(input_str): return [item.strip() for item in input_str.split(',') if item.strip()]
@@ -320,7 +318,7 @@ if search_button_filters:
     
     if not query_parts:
         st.warning("Будь ласка, оберіть хоча б один фільтр.")
-        st.session_state.results_df = pd.DataFrame() # Очищаем результаты, если фильтров нет
+        st.session_state.results_df = pd.DataFrame() 
     else:
         where_clause = " AND ".join(query_parts)
         final_query = f"SELECT * FROM `{TABLE_ID}` WHERE {where_clause} LIMIT 5000"
@@ -328,28 +326,36 @@ if search_button_filters:
         with st.spinner("Виконується запит..."):
             st.session_state.results_df = run_query(final_query, job_config=job_config)
 
-# Отображаем результаты, если они есть в сессии
 if 'results_df' in st.session_state and st.session_state.results_df is not None:
-    results_df = st.session_state.results_df.copy()
-    st.success(f"Знайдено {len(results_df)} записів.")
+    results_df_original = st.session_state.results_df.copy() 
+    st.success(f"Знайдено {len(results_df_original)} записів.")
     
-    if not results_df.empty:
+    show_unique = st.checkbox("Показати тільки унікальні компанії", key="show_unique_companies")
+    
+    if not results_df_original.empty:
         ukrainian_column_names = {
             'data_deklaracii': 'Дата декларації', 'napryamok': 'Напрямок', 'nazva_kompanii': 'Назва компанії',
             'kod_yedrpou': 'Код ЄДРПОУ', 'kraina_partner': 'Країна-партнер', 'kod_uktzed': 'Код УКТЗЕД',
             'opis_tovaru': 'Опис товару', 'mytna_vartist_hrn': 'Митна вартість, грн', 'vaha_netto_kg': 'Вага нетто, кг',
             'vyd_transportu': 'Вид транспорту'
         }
-        results_df = results_df.rename(columns=ukrainian_column_names)
+        results_df = results_df_original.rename(columns=ukrainian_column_names)
         
         numeric_cols = ['Митна вартість, грн', 'Вага нетто, кг']
         for col in numeric_cols:
             if col in results_df.columns:
                 results_df[col] = pd.to_numeric(results_df[col], errors='coerce')
         
-        st.dataframe(results_df)
+        if show_unique and 'Назва компанії' in results_df.columns:
+            display_df = results_df.drop_duplicates(subset=['Назва компанії'], keep='first')
+            # --- ИЗМЕНЕНИЕ: Добавлено сообщение с количеством уникальных компаний ---
+            st.info(f"Відображено {len(display_df)} унікальних компаній.") 
+        else:
+            display_df = results_df
+            
+        st.dataframe(display_df)
 
-        excel_data = to_excel(results_df)
+        excel_data = to_excel(display_df) 
         st.download_button(
             label="📥 Завантажити в форматі Excel",
             data=excel_data,
