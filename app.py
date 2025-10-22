@@ -1,6 +1,6 @@
 # ===============================================
 # app.py - Система анализа таможенных данных
-# Версия: 21.1
+# Версия: 22.0
 # ===============================================
 
 import os
@@ -15,14 +15,14 @@ import re
 from io import BytesIO
 
 # --- КОНФИГУРАЦИЯ ---
-APP_VERSION = "Версия 21.1"
+APP_VERSION = "Версия 22.0"
 st.set_page_config(page_title="Аналітика Митних Даних", layout="wide")
 PROJECT_ID = "ua-customs-analytics"
 TABLE_ID = f"{PROJECT_ID}.ua_customs_data.declarations"
 
 # --- СЛОВАРЬ ДЛЯ ОПИСАНИЯ ГРУПП УКТЗЕД ---
 GROUP_DESCRIPTIONS = {
-    # ... (dictionary remains the same) ...
+    # ... (словарь без изменений) ...
     '01': 'Живі тварини', '02': 'М\'ясо та їстівні субпродукти', '03': 'Риба і ракоподібні', '04': 'Молочні продукти, яйця, мед', '05': 'Інші продукти тваринного походження',
     '06': 'Живі дерева та інші рослини', '07': 'Овочі', '08': 'Їстівні плоди та горіхи', '09': 'Кава, чай, прянощі', '10': 'Зернові культури',
     '11': 'Продукція борошномельно-круп\'яної промисловості', '12': 'Олійне насіння та плоди', '13': 'Шелак, камеді, смоли', '14': 'Рослинні матеріали для виготовлення плетених виробів', '15': 'Жири та олії',
@@ -326,6 +326,7 @@ if search_button_filters:
         with st.spinner("Виконується запит..."):
             st.session_state.results_df = run_query(final_query, job_config=job_config)
 
+# --- ИЗМЕНЕНИЕ: Логика для подсчета и отображения уникальных компаний ---
 if 'results_df' in st.session_state and st.session_state.results_df is not None:
     results_df_original = st.session_state.results_df.copy() 
     st.success(f"Знайдено {len(results_df_original)} записів.")
@@ -346,10 +347,30 @@ if 'results_df' in st.session_state and st.session_state.results_df is not None:
             if col in results_df.columns:
                 results_df[col] = pd.to_numeric(results_df[col], errors='coerce')
         
+        # Логика для подсчета и отображения уникальных
         if show_unique and 'Назва компанії' in results_df.columns:
+            # Считаем количество деклараций для каждой компании ДО удаления дубликатов
+            company_counts = results_df['Назва компанії'].value_counts().reset_index()
+            company_counts.columns = ['Назва компанії', 'Кількість декларацій (у фільтрі)']
+            
+            # Удаляем дубликаты, оставляя первую строку для каждой компании
             display_df = results_df.drop_duplicates(subset=['Назва компанії'], keep='first')
-            # --- ИЗМЕНЕНИЕ: Добавлено сообщение с количеством уникальных компаний ---
-            st.info(f"Відображено {len(display_df)} унікальних компаній.") 
+            
+            # Объединяем с подсчитанным количеством
+            display_df = pd.merge(display_df, company_counts, on='Назва компанії', how='left')
+            
+            st.info(f"Відображено {len(display_df)} унікальних компаній.")
+            
+            # Перемещаем новую колонку на видное место (например, после названия компании)
+            if 'Кількість декларацій (у фільтрі)' in display_df.columns:
+                 cols = list(display_df.columns)
+                 count_col_index = cols.index('Кількість декларацій (у фільтрі)')
+                 name_col_index = cols.index('Назва компанії')
+                 # Убираем колонку со старого места и вставляем после 'Назва компанії'
+                 cols.pop(count_col_index)
+                 cols.insert(name_col_index + 1, 'Кількість декларацій (у фільтрі)')
+                 display_df = display_df[cols]
+
         else:
             display_df = results_df
             
